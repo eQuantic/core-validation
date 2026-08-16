@@ -55,3 +55,20 @@ jobs:
         with:
           name: packages
           path: artifacts/*nupkg
+
+  # Proves the Native AOT claim on every build: publishes the smoke app as a native binary
+  # and executes it. The app exercises generated validators, fluent validators with
+  # pre-compiled accessors, DI dispatching, manifests, Zod export and built-in translations.
+  aot-smoke:
+    name: Native AOT (smoke)
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish native binary
+        run: dotnet publish test/eQuantic.Validation.AotSmoke -c Release -o artifacts/aot-smoke
+      - name: Run native binary
+        run: ./artifacts/aot-smoke/eQuantic.Validation.AotSmoke
