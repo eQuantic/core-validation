@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>eQuantic Validation</Title>
+    <Description>Modern, structured and asynchronous validation for .NET. Fluent rules, DataAnnotations interoperability, validation scenarios and ASP.NET Core-ready outcomes.</Description>
+    <AssemblyTitle>eQuantic.Validation</AssemblyTitle>
+    <AssemblyName>eQuantic.Validation</AssemblyName>
+    <PackageId>eQuantic.Validation</PackageId>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <PackageTags>eQuantic;Validation;FluentValidation;DataAnnotations;Async;DotNet</PackageTags>
+    <PackageReleaseNotes>Initial release: fluent validation, async rules, scenarios, nesting, collections and structured failures.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\eQuantic.Validation.Abstractions\eQuantic.Validation.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+  </ItemGroup>
+</Project>

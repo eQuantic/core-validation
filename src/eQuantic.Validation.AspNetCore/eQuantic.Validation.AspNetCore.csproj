@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>eQuantic Validation for ASP.NET Core</Title>
+    <Description>Opt-in eQuantic.Validation integration for ASP.NET Core Minimal APIs and MVC controllers.</Description>
+    <AssemblyTitle>eQuantic.Validation.AspNetCore</AssemblyTitle>
+    <AssemblyName>eQuantic.Validation.AspNetCore</AssemblyName>
+    <PackageId>eQuantic.Validation.AspNetCore</PackageId>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <PackageTags>eQuantic;Validation;AspNetCore;MinimalApi;MVC;ProblemDetails</PackageTags>
+    <PackageReleaseNotes>Initial ASP.NET Core integration with scoped validators and RFC 7807-compatible responses.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\eQuantic.Validation.Abstractions\eQuantic.Validation.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.11" />
+    <PackageReference Include="Microsoft.OpenApi" Version="1.6.22" />
+  </ItemGroup>
+</Project>

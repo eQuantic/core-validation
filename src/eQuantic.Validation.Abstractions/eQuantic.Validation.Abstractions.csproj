@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>eQuantic Validation Abstractions</Title>
+    <Description>Framework-independent contracts and structured outcomes for eQuantic.Validation implementations.</Description>
+    <AssemblyTitle>eQuantic.Validation.Abstractions</AssemblyTitle>
+    <AssemblyName>eQuantic.Validation.Abstractions</AssemblyName>
+    <PackageId>eQuantic.Validation.Abstractions</PackageId>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <PackageTags>eQuantic;Validation;Abstractions;Contracts;DotNet</PackageTags>
+    <PackageReleaseNotes>Initial validation contracts: validators, context, structured failures and results.</PackageReleaseNotes>
+  </PropertyGroup>
+</Project>

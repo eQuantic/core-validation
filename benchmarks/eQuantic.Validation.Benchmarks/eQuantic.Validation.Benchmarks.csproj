@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="FluentValidation" Version="11.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\eQuantic.Validation.Abstractions\eQuantic.Validation.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\eQuantic.Validation\eQuantic.Validation.csproj" />
+    <ProjectReference Include="..\..\src\eQuantic.Validation.AspNetCore\eQuantic.Validation.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\eQuantic.Validation.Generator\eQuantic.Validation.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>
