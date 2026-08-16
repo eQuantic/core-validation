@@ -44,6 +44,23 @@ public sealed class CollectionRuleBuilder<T, TElement>
         return this;
     }
 
+    /// <summary>
+    /// Declares inline rules for every element without a separate validator class:
+    /// <c>RuleForEach(x =&gt; x.Contacts).ChildRules(c =&gt; c.RuleFor(e =&gt; e.Email).Email())</c>.
+    /// </summary>
+    public CollectionRuleBuilder<T, TElement> ChildRules(Action<InlineValidator<TElement>> rules)
+    {
+        if (rules is null)
+        {
+            throw new ArgumentNullException(nameof(rules));
+        }
+
+        var child = new InlineValidator<TElement>();
+        rules(child);
+        _rule.SetChildValidator(child);
+        return this;
+    }
+
     /// <summary>Replaces the message for the immediately preceding element validator.</summary>
     public CollectionRuleBuilder<T, TElement> WithMessage(string messageTemplate)
     {

@@ -236,16 +236,16 @@ public static class ZodSchemaExporter
                 return string.IsNullOrEmpty(pattern)
                     ? string.Empty
                     : ".regex(/" + pattern!.Replace("/", "\\/") + "/)";
-            case ValidationRuleKinds.GreaterThan:
-                return ".gt(" + Number(rule, "Minimum") + ")";
-            case ValidationRuleKinds.GreaterThanOrEqual:
-                return ".gte(" + Number(rule, "Minimum") + ")";
-            case ValidationRuleKinds.LessThan:
-                return ".lt(" + Number(rule, "Maximum") + ")";
-            case ValidationRuleKinds.LessThanOrEqual:
-                return ".lte(" + Number(rule, "Maximum") + ")";
-            case ValidationRuleKinds.InclusiveBetween:
-                return ".gte(" + Number(rule, "Minimum") + ").lte(" + Number(rule, "Maximum") + ")";
+            case ValidationRuleKinds.GreaterThan when TryNumber(rule, "Minimum") is { } exclusiveMinimum:
+                return ".gt(" + exclusiveMinimum + ")";
+            case ValidationRuleKinds.GreaterThanOrEqual when TryNumber(rule, "Minimum") is { } minimum:
+                return ".gte(" + minimum + ")";
+            case ValidationRuleKinds.LessThan when TryNumber(rule, "Maximum") is { } exclusiveMaximum:
+                return ".lt(" + exclusiveMaximum + ")";
+            case ValidationRuleKinds.LessThanOrEqual when TryNumber(rule, "Maximum") is { } maximum:
+                return ".lte(" + maximum + ")";
+            case ValidationRuleKinds.InclusiveBetween when TryNumber(rule, "Minimum") is { } betweenMinimum:
+                return ".gte(" + betweenMinimum + ").lte(" + Number(rule, "Maximum") + ")";
             default:
                 return string.Empty;
         }
@@ -259,7 +259,8 @@ public static class ZodSchemaExporter
                 or ValidationRuleKinds.Create
                 or ValidationRuleKinds.Parse
                 or ValidationRuleKinds.NotEqual
-                or ValidationRuleKinds.OneOf)
+                or ValidationRuleKinds.OneOf ||
+                rule.Arguments.ContainsKey("OtherPath"))
             .Select(static rule => rule.Code)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -279,9 +280,12 @@ public static class ZodSchemaExporter
     }
 
     private static string Number(ValidationRuleDescriptor rule, string name) =>
+        TryNumber(rule, name) ?? "0";
+
+    private static string? TryNumber(ValidationRuleDescriptor rule, string name) =>
         rule.Arguments.TryGetValue(name, out var value) && value is not null
-            ? Convert.ToString(value, CultureInfo.InvariantCulture) ?? "0"
-            : "0";
+            ? Convert.ToString(value, CultureInfo.InvariantCulture)
+            : null;
 
     private static string ToCamelCase(string name) =>
         name.Length == 0 || char.IsLower(name[0])

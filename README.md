@@ -59,7 +59,8 @@ public sealed class PaymentValidator : Validator<PaymentRequest>
 ```
 
 Shortcuts cover the common cases without ceremony — `GreaterThanOrEqualTo`, `LessThanOrEqualTo`,
-`NotEqualTo`, `OneOf`, and `InlineValidator<T>` for rules without a subclass:
+`NotEqualTo`, `OneOf`, cross-property comparisons, inline child rules and `InlineValidator<T>`
+for rules without a subclass:
 
 ```csharp
 var validator = new InlineValidator<Order>(v =>
@@ -67,8 +68,22 @@ var validator = new InlineValidator<Order>(v =>
     v.RuleFor(x => x.Quantity).GreaterThanOrEqualTo(1);
     v.RuleFor(x => x.Currency).NotNull().OneOf("BRL", "EUR", "USD");
     v.RuleFor(x => x.Status).NotEqualTo("deleted");
+
+    // Compare against other members of the same model:
+    v.RuleFor(x => x.DeliveryDate).GreaterThan(x => x.OrderDate);
+    v.RuleFor(x => x.ConfirmEmail).EqualTo(x => x.Email);
+
+    // Child rules without a separate validator class:
+    v.RuleForEach(x => x.Items).ChildRules(item =>
+    {
+        item.RuleFor(i => i.Sku).NotWhiteSpace();
+        item.RuleFor(i => i.Quantity).GreaterThan(0);
+    });
 });
 ```
+
+Migrating from FluentValidation? The rule-by-rule mapping lives in
+[docs/migrating-from-fluentvalidation.md](docs/migrating-from-fluentvalidation.md).
 
 When the source generator is installed, every `RuleFor(x => x.Prop)` accessor is pre-compiled at
 build time and registered at module load — the fluent path never pays `Expression.Compile()` at
@@ -145,9 +160,11 @@ var builder = WebApplication.CreateBuilder(args);
 //    never registers its validators behind your back — each assembly opts in explicitly.
 builder.Services.AddGeneratedValidation();
 
-// 2. Localization / i18n via IStringLocalizer. Combine with UseRequestLocalization so the
-//    Accept-Language header drives the resolved culture per request.
-builder.Services.AddValidationLocalization<ValidationResources>();
+// 2. Localization / i18n. The parameterless overload ships built-in translations for the
+//    default messages (en, pt, es, fr, de, it); pass a resource type to use your own resx.
+//    Combine with UseRequestLocalization so Accept-Language drives the culture per request.
+builder.Services.AddValidationLocalization();                          // built-in languages
+// builder.Services.AddValidationLocalization<ValidationResources>();  // your own resources
 
 // 3. Native OpenAPI 3.1 schema transformer (Scalar / Swagger)
 builder.Services.AddOpenApi(options =>
@@ -364,7 +381,7 @@ arguments), which keeps localization consistent across the generated and fluent 
 | **Native OpenAPI 3.1** | ⚠️ Requires 3rd party libraries | ✅ Native **`AddValidationTransformer()`** (.NET 10) |
 | **Structured errors** | ❌ Primarily plain strings | ✅ Strongly-typed `Code`, `Path`, `Severity`, and `Arguments` |
 | **String rules type-safety** | ✅ Compile-time via `IRuleBuilder<T, string>` | ✅ Compile-time via covariant `IRuleBuilder<T, out TProperty>` |
-| **Localization / i18n** | ⚠️ Global static resx | ✅ Per-request **`IStringLocalizer`** with lookup by stable code |
+| **Localization / i18n** | ⚠️ Global static resx | ✅ Built-in translations (en/pt/es/fr/de/it) + per-request **`IStringLocalizer`** with lookup by stable code |
 | **Observability** | ❌ No native metrics | ✅ Integrated **OpenTelemetry Meter & ActivitySource** |
 | **Scenarios & PATCH** | ⚠️ Rigid `RuleSet` | ✅ Flexible `ForScenarios("create")` & `ForPaths("Address.City")` |
 | **Rules as data / client export** | ❌ Opaque runtime lambdas | ✅ `Describe()` manifest + **Zod/TypeScript export** |

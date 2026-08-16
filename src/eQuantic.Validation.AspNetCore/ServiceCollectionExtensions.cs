@@ -8,6 +8,24 @@ namespace eQuantic.Validation.AspNetCore;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// Registers the built-in translations for the library's default messages (en, pt, es, fr,
+    /// de, it), resolved per request from the current UI culture. Combine with
+    /// <c>app.UseRequestLocalization()</c> so <c>Accept-Language</c> drives the language.
+    /// Messages customized with <c>WithMessage</c> are never translated.
+    /// </summary>
+    public static IServiceCollection AddValidationLocalization(this IServiceCollection services)
+    {
+        if (services is null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.AddValidationDispatcher();
+        services.TryAddSingleton<IValidationMessageProvider>(BuiltInValidationMessages.Instance);
+        return services;
+    }
+
+    /// <summary>
     /// Registers a localized validation message provider using <see cref="IStringLocalizer{TResource}"/>.
     /// Combine with request localization middleware so the request culture drives the resolved language.
     /// </summary>

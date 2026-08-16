@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Linq.Expressions;
 using eQuantic.Validation.Internal;
 
 namespace eQuantic.Validation;
@@ -140,6 +141,100 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
                 ["Maximum"] = maximum,
             },
             kind: ValidationRuleKinds.InclusiveBetween);
+    }
+
+    /// <summary>Requires the value to be greater than another member of the same model, e.g. <c>RuleFor(x =&gt; x.EndDate).GreaterThan(x =&gt; x.StartDate)</c>.</summary>
+    public RuleBuilder<T, TProperty> GreaterThan(Expression<Func<T, TProperty>> other) =>
+        CompareTo(other, static comparison => comparison > 0,
+            ValidationRuleKinds.GreaterThan, "{Property} must be greater than {OtherProperty}.");
+
+    /// <summary>Requires the value to be greater than or equal to another member of the same model.</summary>
+    public RuleBuilder<T, TProperty> GreaterThanOrEqualTo(Expression<Func<T, TProperty>> other) =>
+        CompareTo(other, static comparison => comparison >= 0,
+            ValidationRuleKinds.GreaterThanOrEqual, "{Property} must be at least {OtherProperty}.");
+
+    /// <summary>Requires the value to be less than another member of the same model.</summary>
+    public RuleBuilder<T, TProperty> LessThan(Expression<Func<T, TProperty>> other) =>
+        CompareTo(other, static comparison => comparison < 0,
+            ValidationRuleKinds.LessThan, "{Property} must be less than {OtherProperty}.");
+
+    /// <summary>Requires the value to be less than or equal to another member of the same model.</summary>
+    public RuleBuilder<T, TProperty> LessThanOrEqualTo(Expression<Func<T, TProperty>> other) =>
+        CompareTo(other, static comparison => comparison <= 0,
+            ValidationRuleKinds.LessThanOrEqual, "{Property} must be at most {OtherProperty}.");
+
+    /// <summary>Requires equality with another member of the same model, e.g. <c>RuleFor(x =&gt; x.ConfirmPassword).EqualTo(x =&gt; x.Password)</c>.</summary>
+    public RuleBuilder<T, TProperty> EqualTo(Expression<Func<T, TProperty>> other)
+    {
+        var (otherPath, accessor, arguments) = ResolveOther(other);
+        return Add(
+            (instance, value) => EqualityComparer<TProperty>.Default.Equals(value, accessor(instance)),
+            ValidationCodes.Predicate,
+            "{Property} must be equal to {OtherProperty}.",
+            arguments,
+            kind: ValidationRuleKinds.Equal);
+    }
+
+    /// <summary>Requires the value to differ from another member of the same model.</summary>
+    public RuleBuilder<T, TProperty> NotEqualTo(Expression<Func<T, TProperty>> other)
+    {
+        var (otherPath, accessor, arguments) = ResolveOther(other);
+        return Add(
+            (instance, value) => !EqualityComparer<TProperty>.Default.Equals(value, accessor(instance)),
+            ValidationCodes.Predicate,
+            "{Property} must differ from {OtherProperty}.",
+            arguments,
+            kind: ValidationRuleKinds.NotEqual);
+    }
+
+    /// <summary>Declares inline rules for a non-null nested member without a separate validator class.</summary>
+    public RuleBuilder<T, TProperty> ChildRules(Action<InlineValidator<TProperty>> rules)
+    {
+        if (rules is null)
+        {
+            throw new ArgumentNullException(nameof(rules));
+        }
+
+        var child = new InlineValidator<TProperty>();
+        rules(child);
+        _rule.SetChildValidator(child);
+        return this;
+    }
+
+    private RuleBuilder<T, TProperty> CompareTo(
+        Expression<Func<T, TProperty>> other,
+        Func<int, bool> comparisonPasses,
+        string kind,
+        string template)
+    {
+        var (_, accessor, arguments) = ResolveOther(other);
+        return Add(
+            (instance, value) => value is null ||
+                comparisonPasses(Comparer<TProperty>.Default.Compare(value, accessor(instance))),
+            ValidationCodes.Range,
+            template,
+            arguments,
+            kind: kind);
+    }
+
+    private static (string Path, Func<T, TProperty> Accessor, Dictionary<string, object?> Arguments) ResolveOther(
+        Expression<Func<T, TProperty>> other)
+    {
+        if (other is null)
+        {
+            throw new ArgumentNullException(nameof(other));
+        }
+
+        var otherPath = PropertyPath.FromExpression(other);
+        var accessor = ValidatorAccessors.Find<T, TProperty>(otherPath) ?? other.Compile();
+        var displayName = otherPath.Length == 0 ? typeof(T).Name : otherPath.Split('.').Last();
+        var arguments = new Dictionary<string, object?>
+        {
+            ["OtherProperty"] = displayName,
+            ["OtherPath"] = otherPath,
+        };
+
+        return (otherPath, accessor, arguments);
     }
 
     /// <summary>Adds a synchronous custom predicate for this property.</summary>

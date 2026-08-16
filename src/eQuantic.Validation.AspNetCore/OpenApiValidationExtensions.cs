@@ -133,24 +133,24 @@ public static class OpenApiValidationExtensions
 
                     break;
 
-                case ValidationRuleKinds.GreaterThan:
-                    propertySchema.ExclusiveMinimum = GetNumber(rule, "Minimum");
+                case ValidationRuleKinds.GreaterThan when GetNumber(rule, "Minimum") is { } exclusiveMinimum:
+                    propertySchema.ExclusiveMinimum = exclusiveMinimum;
                     break;
 
-                case ValidationRuleKinds.GreaterThanOrEqual:
-                    propertySchema.Minimum = GetNumber(rule, "Minimum");
+                case ValidationRuleKinds.GreaterThanOrEqual when GetNumber(rule, "Minimum") is { } minimum:
+                    propertySchema.Minimum = minimum;
                     break;
 
-                case ValidationRuleKinds.LessThan:
-                    propertySchema.ExclusiveMaximum = GetNumber(rule, "Maximum");
+                case ValidationRuleKinds.LessThan when GetNumber(rule, "Maximum") is { } exclusiveMaximum:
+                    propertySchema.ExclusiveMaximum = exclusiveMaximum;
                     break;
 
-                case ValidationRuleKinds.LessThanOrEqual:
-                    propertySchema.Maximum = GetNumber(rule, "Maximum");
+                case ValidationRuleKinds.LessThanOrEqual when GetNumber(rule, "Maximum") is { } maximum:
+                    propertySchema.Maximum = maximum;
                     break;
 
-                case ValidationRuleKinds.InclusiveBetween:
-                    propertySchema.Minimum = GetNumber(rule, "Minimum");
+                case ValidationRuleKinds.InclusiveBetween when GetNumber(rule, "Minimum") is { } betweenMinimum:
+                    propertySchema.Minimum = betweenMinimum;
                     propertySchema.Maximum = GetNumber(rule, "Maximum");
                     break;
             }
