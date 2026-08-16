@@ -30,6 +30,7 @@ public sealed class ValidationActionFilter : IAsyncActionFilter, IOrderedFilter
             executionMode: _executionMode,
             deduplicateAsyncRules: true);
 
+        var warnings = new List<ValidationFailure>();
         foreach (var argument in context.ActionArguments.Values)
         {
             if (argument is null)
@@ -45,8 +46,11 @@ public sealed class ValidationActionFilter : IAsyncActionFilter, IOrderedFilter
                 context.Result = new BadRequestObjectResult(ValidationProblemDetailsFactory.Mvc(result));
                 return;
             }
+
+            warnings.AddRange(result.Warnings);
         }
 
+        ValidationWarnings.Attach(context.HttpContext, warnings);
         await next().ConfigureAwait(false);
     }
 }

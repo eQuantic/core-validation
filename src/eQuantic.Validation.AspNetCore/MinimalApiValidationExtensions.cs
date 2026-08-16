@@ -62,6 +62,7 @@ public static class MinimalApiValidationExtensions
                 executionMode: executionMode,
                 deduplicateAsyncRules: true);
 
+            var warnings = new List<ValidationFailure>();
             foreach (var argument in invocationContext.Arguments)
             {
                 if (argument is null)
@@ -76,8 +77,11 @@ public static class MinimalApiValidationExtensions
                 {
                     return ValidationProblemDetailsFactory.MinimalApi(result);
                 }
+
+                warnings.AddRange(result.Warnings);
             }
 
+            ValidationWarnings.Attach(invocationContext.HttpContext, warnings);
             return await next(invocationContext).ConfigureAwait(false);
         });
     }

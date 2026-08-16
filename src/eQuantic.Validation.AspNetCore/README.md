@@ -43,4 +43,34 @@ builder.Services.AddOpenApi(options =>
 });
 ```
 
-Failed validation requests automatically return HTTP 400 with RFC 7807 / RFC 9457 `ValidationProblemDetails`. The `errors` dictionary maintains ASP.NET Core client compatibility, while `extensions.issues` provides structured `code`, `path`, and `severity` (emitted as JSON nodes, safe for source-generated serialization and Native AOT).
+Failed validation requests automatically return HTTP 400 with RFC 7807 / RFC 9457 `ValidationProblemDetails`. The `errors` dictionary maintains ASP.NET Core client compatibility, while `extensions.issues` provides structured `code`, `path`, and `severity` (emitted as JSON nodes, safe for source-generated serialization and Native AOT):
+
+```json
+{
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": { "Email": ["Email must be a valid email address."] },
+  "issues": [
+    { "path": "Email", "code": "customer.email.invalid", "message": "Email must be a valid email address.", "severity": "Error" }
+  ]
+}
+```
+
+### Warnings on successful responses
+
+Valid requests with `Severity.Warning` failures respond `200` with a `Validation-Warnings`
+header (`path:code` pairs). The full failures are available to the handler:
+
+```csharp
+app.MapPut("/profile", (UpdateProfile request, HttpContext http) =>
+{
+    var warnings = ValidationWarnings.GetWarnings(http);
+    return Results.Ok(new { saved = true, warnings });
+}).RequireValidation();
+```
+
+### Async rule deduplication
+
+The filters create one validation context per request with async-rule deduplication enabled:
+the same `MustAsync` for the same instance and value (composed validators, duplicated collection
+elements, revalidation) performs its I/O once per request. No configuration needed.
