@@ -4,7 +4,9 @@
 [![NuGet](https://img.shields.io/nuget/v/eQuantic.Validation.svg)](https://www.nuget.org/packages/eQuantic.Validation/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Modern, high-performance validation for .NET 10: compile-time source-generated validators (low-allocation, reflection-free), relational pattern matching, native OpenAPI 3.1 schema transformers, OpenTelemetry metrics and tracing, per-request i18n, and trim/AOT-analyzer-verified packages.**
+**Modern, high-performance validation for .NET 10: compile-time source-generated validators (low-allocation, reflection-free), relational pattern matching, native OpenAPI 3.1 schema transformers, OpenTelemetry metrics and tracing, per-request i18n, and Native AOT compatibility proven by a CI-published native binary.**
+
+📚 **[Documentation](docs/README.md)** — nine guides with runnable examples, from getting started to Zod export. Coming from FluentValidation? [Start here](docs/migrating-from-fluentvalidation.md).
 
 ---
 
