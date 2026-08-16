@@ -9,3 +9,6 @@ VALGEN001 | Validation | Warning | Generated registration requires eQuantic.Vali
 VALGEN002 | Validation | Error | CustomRule method returning bool was not found on the target type
 VALGEN003 | Validation | Warning | ValidateEach element type could not be resolved from the property type
 VALGEN004 | Validation | Warning | Validation rule or target is not supported by the generator
+VALGEN005 | Validation | Error | RuleFor/RuleForEach lambda must be a simple member expression
+VALGEN006 | Validation | Error | WithMessage/WithCode/WithSeverity called before any rule in the chain
+VALGEN007 | Validation | Warning | Synchronous Validate on a validator declaring unconditional asynchronous rules

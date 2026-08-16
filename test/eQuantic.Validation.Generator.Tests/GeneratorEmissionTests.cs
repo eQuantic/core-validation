@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 using NUnit.Framework;
 
 namespace eQuantic.Validation.Generator.Tests;
@@ -217,6 +218,101 @@ public sealed class GeneratorEmissionTests
             Assert.That(registrations, Does.Contain("internal static class ValidationGeneratedExtensions"));
             Assert.That(registrations, Does.Contain("AddValidationDispatcher"));
         });
+    }
+
+    [Test]
+    public async Task Analyzer_reports_invalid_rule_lambdas_as_errors()
+    {
+        var diagnostics = await RunAnalyzer(Preamble + """
+            public sealed record Person(string? Name);
+            public sealed class PersonValidator : Validator<Person>
+            {
+                public PersonValidator()
+                {
+                    RuleFor(x => x.Name!.Trim()).NotNull();
+                }
+            }
+            """);
+
+        Assert.That(diagnostics.Select(d => d.Id), Does.Contain("VALGEN005"));
+    }
+
+    [Test]
+    public async Task Analyzer_reports_configurators_called_before_any_rule()
+    {
+        var diagnostics = await RunAnalyzer(Preamble + """
+            public sealed record Person(string? Name);
+            public sealed class PersonValidator : Validator<Person>
+            {
+                public PersonValidator()
+                {
+                    RuleFor(x => x.Name).WithMessage("Name is required.");
+                }
+            }
+            """);
+
+        Assert.That(diagnostics.Select(d => d.Id), Does.Contain("VALGEN006"));
+    }
+
+    [Test]
+    public async Task Analyzer_warns_on_sync_validate_with_unconditional_async_rules()
+    {
+        var diagnostics = await RunAnalyzer(Preamble + """
+            using System.Threading.Tasks;
+
+            public sealed record Person(string? Name);
+            public sealed class PersonValidator : Validator<Person>
+            {
+                public PersonValidator()
+                {
+                    RuleFor(x => x.Name).MustAsync((_, _, _, _) => Task.FromResult(true));
+                }
+            }
+
+            public static class CallSite
+            {
+                public static ValidationResult Run() => new PersonValidator().Validate(new Person("x"));
+            }
+            """);
+
+        Assert.That(diagnostics.Select(d => d.Id), Does.Contain("VALGEN007"));
+    }
+
+    [Test]
+    public async Task Analyzer_stays_quiet_for_scenario_scoped_async_rules_and_clean_code()
+    {
+        var diagnostics = await RunAnalyzer(Preamble + """
+            using System.Threading.Tasks;
+
+            public sealed record Person(string? Name);
+            public sealed class PersonValidator : Validator<Person>
+            {
+                public PersonValidator()
+                {
+                    RuleFor(x => x.Name).NotWhiteSpace().WithMessage("Name is required.");
+                    RuleFor(x => x.Name)
+                        .MustAsync((_, _, _, _) => Task.FromResult(true))
+                        .ForScenarios("create");
+                }
+            }
+
+            public static class CallSite
+            {
+                public static ValidationResult Run() => new PersonValidator().Validate(new Person("x"));
+            }
+            """);
+
+        Assert.That(diagnostics.Where(d => d.Id.StartsWith("VALGEN", StringComparison.Ordinal)), Is.Empty);
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> RunAnalyzer(string source)
+    {
+        var run = RunGenerator(source);
+        AssertCompiles(run);
+
+        var withAnalyzers = run.Output.WithAnalyzers(
+            ImmutableArray.Create<Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer>(new ValidationUsageAnalyzer()));
+        return await withAnalyzers.GetAnalyzerDiagnosticsAsync();
     }
 
     private sealed record GeneratorRun(

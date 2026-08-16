@@ -225,6 +225,63 @@ validator.TestValidate(tooShort)
 
 ---
 
+## ⚠️ Warnings That Reach the Client
+
+`Severity.Warning` rules don't block the request — and they don't die on the server either. When
+a valid request carries warnings, the HTTP integrations attach them to the successful response
+automatically:
+
+```csharp
+public sealed class ProfileValidator : Validator<UpdateProfile>
+{
+    public ProfileValidator()
+    {
+        RuleFor(x => x.Nickname)
+            .Must(n => n != "legacy", "profile.nickname.legacy")
+            .WithMessage("This nickname format is deprecated.")
+            .WithSeverity(ValidationSeverity.Warning);   // valid, but tell the caller
+    }
+}
+```
+
+```http
+HTTP/1.1 200 OK
+Validation-Warnings: Nickname:profile.nickname.legacy
+```
+
+The header carries compact `path:code` pairs; handlers that want to enrich the response body get
+the full failures from `ValidationWarnings.GetWarnings(httpContext)`:
+
+```csharp
+app.MapPut("/profile", (UpdateProfile request, HttpContext http) =>
+{
+    var warnings = ValidationWarnings.GetWarnings(http);   // full path/code/message/arguments
+    return Results.Ok(new { saved = true, warnings });
+}).RequireValidation();
+```
+
+---
+
+## 🧭 Compile-Time Diagnostics
+
+The generator package also ships a usage analyzer: mistakes that would only explode at runtime
+become build-time diagnostics with the offending code highlighted.
+
+| ID | Severity | Triggers on | Instead of |
+| --- | --- | --- | --- |
+| `VALGEN001` | Warning | `AddGeneratedValidation()` without `eQuantic.Validation` + `M.E.DependencyInjection.Abstractions` referenced | registrations silently missing |
+| `VALGEN002` | Error | `[CustomRule("Missing")]` naming a method that doesn't exist or doesn't return `bool` | cryptic errors inside generated code |
+| `VALGEN003` | Warning | `[ValidateEach]` on a property that isn't `IEnumerable<T>` | rule silently skipped |
+| `VALGEN004` | Warning | rule/type mismatch, e.g. `[Email] int Age` or `[GenerateValidator]` on a generic type | runtime surprises |
+| `VALGEN005` | Error | `RuleFor(x => x.Name!.Trim())` — anything but a member path | `ArgumentException` at runtime |
+| `VALGEN006` | Error | `RuleFor(x => x.Name).WithMessage(...)` with no rule before the configurator | `InvalidOperationException` when the validator is constructed |
+| `VALGEN007` | Warning | `validator.Validate(model)` on a validator declaring unconditional async rules | `AsyncValidationRequiredException` at runtime |
+
+`VALGEN007` understands scenarios: an async rule scoped with `.ForScenarios("create")` doesn't
+flag synchronous validation, because outside that scenario the sync path is legal.
+
+---
+
 ## 📜 Rule Manifest: Validation as Data
 
 Every validator — fluent or source-generated — implements `IDescribableValidator` and publishes
