@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\eQuantic.Validation\eQuantic.Validation.csproj" />
+    <ProjectReference Include="..\..\src\eQuantic.Validation.Testing\eQuantic.Validation.Testing.csproj" />
     <ProjectReference Include="..\..\src\eQuantic.Validation.AspNetCore\eQuantic.Validation.AspNetCore.csproj" />
     <ProjectReference Include="..\eQuantic.Validation.Generator.Fixtures\eQuantic.Validation.Generator.Fixtures.csproj" />
     <ProjectReference Include="..\..\src\eQuantic.Validation.Generator\eQuantic.Validation.Generator.csproj"

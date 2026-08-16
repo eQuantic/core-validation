@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>eQuantic Validation Testing</Title>
+    <Description>Test helpers for eQuantic.Validation: TestValidate with chainable, framework-agnostic assertions over structured failures (path, code, severity and arguments).</Description>
+    <AssemblyTitle>eQuantic.Validation.Testing</AssemblyTitle>
+    <AssemblyName>eQuantic.Validation.Testing</AssemblyName>
+    <PackageId>eQuantic.Validation.Testing</PackageId>
+    <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
+    <IsAotCompatible Condition="'$(TargetFramework)' != 'netstandard2.0'">true</IsAotCompatible>
+    <PackageTags>eQuantic;Validation;Testing;UnitTest;NUnit;xUnit;MSTest</PackageTags>
+    <PackageReleaseNotes>Initial release: TestValidate/TestValidateAsync with chainable failure assertions.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\eQuantic.Validation\eQuantic.Validation.csproj" />
+  </ItemGroup>
+</Project>

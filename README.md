@@ -179,6 +179,30 @@ eQuantic.Validation when you need what it doesn't cover:
 
 ---
 
+## 🧪 Testing Validators
+
+`eQuantic.Validation.Testing` ships `TestValidate` with chainable, framework-agnostic assertions
+over the structured failure model — tests match on stable codes and rule arguments, never on
+message strings:
+
+```csharp
+using eQuantic.Validation.Testing;
+
+validator.TestValidate(new CreateCustomer(Name: "A", Email: "nope", Age: 15))
+    .ShouldBeInvalid()
+    .ShouldHaveFailureFor(x => x.Email).WithCode("customer.email.invalid");
+
+validator.TestValidate(valid).ShouldBeValid().ShouldNotHaveFailureFor(x => x.Email);
+
+var result = await validator.TestValidateAsync(customer, "create");   // scenarios + async rules
+result.ShouldHaveFailureWithCode("customer.email.taken");
+
+validator.TestValidate(tooShort)
+    .ShouldHaveFailureFor("Name").WithArgument("MinimumLength", 2).Exactly(1);
+```
+
+---
+
 ## 📊 Observability & Metrics with OpenTelemetry
 
 Native metrics (`System.Diagnostics.Metrics`) and distributed tracing (`ActivitySource`) with **zero PII**:
@@ -240,6 +264,7 @@ Native AOT (functional, with reduced throughput). The source-generated path has 
 | `eQuantic.Validation` | Fluent DSL engine, pattern matching, async rules, Value Objects, DI dispatching (`AddValidationDispatcher`, `AddValidator`) and OpenTelemetry instrumentation. |
 | `eQuantic.Validation.AspNetCore` | Minimal APIs (`RequireValidation`), MVC action filter (`AddValidationFilter`), OpenAPI transformer and i18n message provider. |
 | `eQuantic.Validation.Generator` | Roslyn incremental source generator for reflection-free validators and compile-time DI registration. |
+| `eQuantic.Validation.Testing` | `TestValidate` with chainable, framework-agnostic assertions (`ShouldHaveFailureFor`, `WithCode`, `WithArgument`). |
 
 ---
 

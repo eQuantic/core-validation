@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "eQuantic.Validation.Benchma
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "eQuantic.Validation.Generator.Tests", "test\eQuantic.Validation.Generator.Tests\eQuantic.Validation.Generator.Tests.csproj", "{F5D7331A-6A10-4F5F-9988-456AAF62BCC4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "eQuantic.Validation.Testing", "src\eQuantic.Validation.Testing\eQuantic.Validation.Testing.csproj", "{5C9E684D-4B27-496B-9947-A2787A3FA143}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -147,6 +149,18 @@ Global
 		{F5D7331A-6A10-4F5F-9988-456AAF62BCC4}.Release|x64.Build.0 = Release|Any CPU
 		{F5D7331A-6A10-4F5F-9988-456AAF62BCC4}.Release|x86.ActiveCfg = Release|Any CPU
 		{F5D7331A-6A10-4F5F-9988-456AAF62BCC4}.Release|x86.Build.0 = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|x64.Build.0 = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Debug|x86.Build.0 = Debug|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|x64.ActiveCfg = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|x64.Build.0 = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|x86.ActiveCfg = Release|Any CPU
+		{5C9E684D-4B27-496B-9947-A2787A3FA143}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -161,5 +175,6 @@ Global
 		{45915565-6FF5-41CB-9700-2D9A845ECCCD} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{67F93656-E1A1-4F94-9F29-9C1E814E12CF} = {66320409-64EC-F7C5-3DEF-65E7510DAAD1}
 		{F5D7331A-6A10-4F5F-9988-456AAF62BCC4} = {D829BF89-C3D8-4ED5-A017-0D24EBCFEEB3}
+		{5C9E684D-4B27-496B-9947-A2787A3FA143} = {E9FBACD5-8A76-4352-B7EE-6E75C3BE4E02}
 	EndGlobalSection
 EndGlobal
