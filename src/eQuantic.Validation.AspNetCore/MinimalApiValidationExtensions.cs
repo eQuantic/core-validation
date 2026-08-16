@@ -59,7 +59,8 @@ public static class MinimalApiValidationExtensions
             var context = new ValidationContext(
                 scenarios: scenarioCopy,
                 services: invocationContext.HttpContext.RequestServices,
-                executionMode: executionMode);
+                executionMode: executionMode,
+                deduplicateAsyncRules: true);
 
             foreach (var argument in invocationContext.Arguments)
             {

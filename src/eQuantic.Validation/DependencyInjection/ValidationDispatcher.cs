@@ -39,9 +39,10 @@ public sealed class ValidationDispatcher : IValidationDispatcher
                     includedPaths: context.IncludedPaths,
                     services: context.Services ?? services,
                     executionMode: context.ExecutionMode,
-                    messageProvider: messageProvider)
+                    messageProvider: messageProvider,
+                    deduplicateAsyncRules: context.AsyncRuleCache is not null)
                 : context)
-            : new ValidationContext(services: services, messageProvider: messageProvider);
+            : new ValidationContext(services: services, messageProvider: messageProvider, deduplicateAsyncRules: true);
 
         var modelType = model.GetType();
         var modelName = modelType.Name;

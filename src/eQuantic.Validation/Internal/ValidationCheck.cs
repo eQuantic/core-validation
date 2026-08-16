@@ -49,6 +49,17 @@ internal sealed class ValidationCheck<T, TProperty>
     {
         if (AsyncPredicate is not null)
         {
+            // Deduplicate I/O-bound rules within the operation when the context carries a cache:
+            // the same check for the same instance and value evaluates once.
+            if (context.AsyncRuleCache is { } cache)
+            {
+                return cache.GetOrAdd(
+                    this,
+                    instance,
+                    propertyValue,
+                    () => AsyncPredicate(instance, propertyValue, context, cancellationToken));
+            }
+
             return AsyncPredicate(instance, propertyValue, context, cancellationToken);
         }
 

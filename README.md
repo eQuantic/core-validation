@@ -124,6 +124,12 @@ public sealed class CreateCustomerValidator : Validator<CreateCustomer>
 Calling `Validate` on a validator with active asynchronous rules throws
 `AsyncValidationRequiredException` — async work is never silently skipped or blocked on.
 
+Async rules are **deduplicated per operation**: within one request (the HTTP integrations and the
+dispatcher enable this automatically), the same rule for the same instance and value runs once —
+composed validators, repeated collection elements and revalidation reuse the first result instead
+of repeating the I/O. Standalone usage opts in with
+`new ValidationContext(deduplicateAsyncRules: true)`; nested validators share the cache.
+
 ---
 
 ## 🚀 ASP.NET Core & Minimal APIs Integration (.NET 10)

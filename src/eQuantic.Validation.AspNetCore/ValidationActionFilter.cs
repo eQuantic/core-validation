@@ -27,7 +27,8 @@ public sealed class ValidationActionFilter : IAsyncActionFilter, IOrderedFilter
         var dispatcher = context.HttpContext.RequestServices.GetRequiredService<IValidationDispatcher>();
         var validationContext = new ValidationContext(
             services: context.HttpContext.RequestServices,
-            executionMode: _executionMode);
+            executionMode: _executionMode,
+            deduplicateAsyncRules: true);
 
         foreach (var argument in context.ActionArguments.Values)
         {

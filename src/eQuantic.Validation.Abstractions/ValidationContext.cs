@@ -19,7 +19,8 @@ public sealed class ValidationContext
         IServiceProvider? services = null,
         IReadOnlyDictionary<string, object?>? items = null,
         IValidationMessageProvider? messageProvider = null,
-        ValidationExecutionMode executionMode = ValidationExecutionMode.Sequential)
+        ValidationExecutionMode executionMode = ValidationExecutionMode.Sequential,
+        bool deduplicateAsyncRules = false)
     {
         Scenarios = ToSet(scenarios);
         IncludedPaths = ToSet(includedPaths);
@@ -32,6 +33,7 @@ public sealed class ValidationContext
                 StringComparer.Ordinal));
         MessageProvider = messageProvider;
         ExecutionMode = executionMode;
+        AsyncRuleCache = deduplicateAsyncRules ? new AsyncRuleCache() : null;
     }
 
     /// <summary>Gets a context that executes every rule.</summary>
@@ -54,6 +56,13 @@ public sealed class ValidationContext
 
     /// <summary>Gets the scheduling mode for independent rules.</summary>
     public ValidationExecutionMode ExecutionMode { get; }
+
+    /// <summary>
+    /// Gets the async-rule deduplication cache, or <see langword="null"/> when disabled. A context
+    /// with an active cache should live for a single operation (the HTTP integrations create one
+    /// per request); reusing it across operations would serve stale rule results.
+    /// </summary>
+    public AsyncRuleCache? AsyncRuleCache { get; private set; }
 
     /// <summary>Creates a context for one or more named scenarios.</summary>
     public static ValidationContext ForScenarios(params string[] scenarios) => new(scenarios: scenarios);
@@ -84,12 +93,12 @@ public sealed class ValidationContext
             if (string.Equals(selectedPath, parentPath, StringComparison.OrdinalIgnoreCase) ||
                 IsDescendant(parentPath, selectedPath))
             {
-                return new ValidationContext(
+                return WithSharedCache(new ValidationContext(
                     scenarios: Scenarios,
                     services: Services,
                     items: Items,
                     messageProvider: MessageProvider,
-                    executionMode: ExecutionMode);
+                    executionMode: ExecutionMode));
             }
 
             if (IsDescendant(selectedPath, parentPath))
@@ -98,13 +107,20 @@ public sealed class ValidationContext
             }
         }
 
-        return new ValidationContext(
+        return WithSharedCache(new ValidationContext(
             scenarios: Scenarios,
             includedPaths: childPaths.Count == 0 ? new[] { "\u0000" } : childPaths,
             services: Services,
             items: Items,
             messageProvider: MessageProvider,
-            executionMode: ExecutionMode);
+            executionMode: ExecutionMode));
+    }
+
+    private ValidationContext WithSharedCache(ValidationContext child)
+    {
+        // Nested validators share the operation-wide deduplication cache.
+        child.AsyncRuleCache = AsyncRuleCache;
+        return child;
     }
 
     /// <summary>Returns a service from <see cref="Services"/> or <see langword="null"/> when unavailable.</summary>
