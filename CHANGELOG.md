@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.0](https://github.com/eQuantic/core-validation/compare/v2.0.0...v2.1.0) (2026-08-16)
+
+### Features
+
+* add eQuantic.Validation.Testing package with chainable assertions ([29487ba](https://github.com/eQuantic/core-validation/commit/29487ba65d4bd43d7f088383fb04e2a86e91f1b1))
+* pre-compiled fluent accessors and rule-writing shortcuts ([fdd9dc8](https://github.com/eQuantic/core-validation/commit/fdd9dc8be12ed83a6ad104b1d72685153aac2972))
+* rule manifest with Describe(), fluent OpenAPI enrichment and Zod export ([2e1f587](https://github.com/eQuantic/core-validation/commit/2e1f587d702c98d88dbebe6755352d77e39fe730))
+* surface validation warnings on successful HTTP responses ([2829b9f](https://github.com/eQuantic/core-validation/commit/2829b9f8dcd9e41b94fe54294bb3fc7ca66f3c2a))
+* usage analyzer turns runtime validator mistakes into build errors ([f9a0859](https://github.com/eQuantic/core-validation/commit/f9a08598ae053e0c18bb4e0f8e2c0ddd29d9ba9a))
+
+### Performance Improvements
+
+* deduplicate async rule evaluations within a validation operation ([7452910](https://github.com/eQuantic/core-validation/commit/745291043430cd44551c7fa4685735ba78b6db09))
+
 ## [2.0.0](https://github.com/eQuantic/core-validation/compare/v1.0.0...v2.0.0) (2026-08-16)
 
 ### ⚠ BREAKING CHANGES
