@@ -20,7 +20,8 @@ public static class StringRuleExtensions
         return Builder(builder).Add(
             static (_, value) => value is not null && !string.IsNullOrWhiteSpace(value),
             ValidationCodes.NotWhiteSpace,
-            "{Property} must not be blank.");
+            "{Property} must not be blank.",
+            kind: ValidationRuleKinds.NotWhiteSpace);
     }
 
     /// <summary>Requires a value with a conventional email address shape.</summary>
@@ -29,7 +30,8 @@ public static class StringRuleExtensions
         return Builder(builder).Add(
             static (_, value) => value is null || EmailPattern.IsMatch(value),
             ValidationCodes.Email,
-            "{Property} must be a valid email address.");
+            "{Property} must be a valid email address.",
+            kind: ValidationRuleKinds.Email);
     }
 
     /// <summary>Requires the string to contain at least <paramref name="minimumLength"/> characters.</summary>
@@ -46,7 +48,8 @@ public static class StringRuleExtensions
             (_, value) => value is null || value.Length >= minimumLength,
             ValidationCodes.MinimumLength,
             "{Property} must contain at least {MinimumLength} characters.",
-            new Dictionary<string, object?> { ["MinimumLength"] = minimumLength });
+            new Dictionary<string, object?> { ["MinimumLength"] = minimumLength },
+            kind: ValidationRuleKinds.MinimumLength);
     }
 
     /// <summary>Requires the string to contain no more than <paramref name="maximumLength"/> characters.</summary>
@@ -63,7 +66,8 @@ public static class StringRuleExtensions
             (_, value) => value is null || value.Length <= maximumLength,
             ValidationCodes.MaximumLength,
             "{Property} must contain no more than {MaximumLength} characters.",
-            new Dictionary<string, object?> { ["MaximumLength"] = maximumLength });
+            new Dictionary<string, object?> { ["MaximumLength"] = maximumLength },
+            kind: ValidationRuleKinds.MaximumLength);
     }
 
     /// <summary>Requires the string length to be inside an inclusive range.</summary>
@@ -90,7 +94,8 @@ public static class StringRuleExtensions
             {
                 ["MinimumLength"] = minimumLength,
                 ["MaximumLength"] = maximumLength,
-            });
+            },
+            kind: ValidationRuleKinds.Length);
     }
 
     /// <summary>Requires the string to match <paramref name="pattern"/>.</summary>
@@ -108,7 +113,9 @@ public static class StringRuleExtensions
         return Builder(builder).Add(
             (_, value) => value is null || regex.IsMatch(value),
             ValidationCodes.Pattern,
-            "{Property} has an invalid format.");
+            "{Property} has an invalid format.",
+            new Dictionary<string, object?> { ["Pattern"] = pattern },
+            kind: ValidationRuleKinds.Pattern);
     }
 
     private static RuleBuilder<TModel, string?> Builder<TModel>(IRuleBuilder<TModel, string?> builder)

@@ -72,7 +72,8 @@ internal static class ValidatorEmitter
         sb.Append(indent).Append("/// <summary>Generated reflection-free validator for <see cref=\"").Append(model.ModelName).AppendLine("\"/>.</summary>");
         sb.Append(indent).AppendLine("[global::System.CodeDom.Compiler.GeneratedCode(\"eQuantic.Validation.Generator\", \"2.0.0\")]");
         sb.Append(indent).Append("public sealed class ").Append(model.GeneratedValidatorName)
-            .Append(" : global::eQuantic.Validation.IValidator<").Append(model.FullModelTypeName).AppendLine(">");
+            .Append(" : global::eQuantic.Validation.IValidator<").Append(model.FullModelTypeName)
+            .AppendLine(">, global::eQuantic.Validation.IDescribableValidator");
         sb.Append(indent).AppendLine("{");
 
         EmitRegexFields(sb, inner, model);
@@ -92,6 +93,9 @@ internal static class ValidatorEmitter
 
         sb.Append(inner).AppendLine("global::System.Threading.Tasks.Task<global::eQuantic.Validation.ValidationResult> global::eQuantic.Validation.IValidator.ValidateAsync(object instance, global::eQuantic.Validation.ValidationContext? context, global::System.Threading.CancellationToken cancellationToken) =>");
         sb.Append(inner).Append("    instance is ").Append(model.FullModelTypeName).Append(" typed ? ValidateAsync(typed, context, cancellationToken) : throw new global::System.ArgumentException($\"Expected an instance of '{typeof(").Append(model.FullModelTypeName).AppendLine(").FullName}'.\", nameof(instance));");
+        sb.AppendLine();
+
+        EmitDescribe(sb, inner, model);
         sb.AppendLine();
 
         sb.Append(inner).AppendLine("private static global::eQuantic.Validation.ValidationFailure CreateFailure(global::eQuantic.Validation.ValidationContext context, string path, string displayName, string code, string template, global::eQuantic.Validation.ValidationSeverity severity, global::System.Collections.Generic.IReadOnlyDictionary<string, object?>? arguments)");
@@ -125,6 +129,121 @@ internal static class ValidatorEmitter
         }
 
         context.AddSource(model.HintName, SourceText.From(sb.ToString(), Encoding.UTF8));
+    }
+
+    private static void EmitDescribe(StringBuilder sb, string indent, ModelDescriptor model)
+    {
+        sb.Append(indent).AppendLine("private static readonly global::eQuantic.Validation.ValidationRuleDescriptor[] RuleManifest =");
+        sb.Append(indent).AppendLine("{");
+
+        foreach (var property in model.Properties)
+        {
+            foreach (var rule in property.Rules)
+            {
+                sb.Append(indent).Append("    ").Append(BuildRuleDescriptorLiteral(property, rule)).AppendLine(",");
+            }
+        }
+
+        sb.Append(indent).AppendLine("};");
+        sb.AppendLine();
+        sb.Append(indent).AppendLine("/// <summary>Returns the compile-time rule manifest of this validator.</summary>");
+        sb.Append(indent).Append("public global::eQuantic.Validation.ValidatorDescription Describe() => new(typeof(")
+            .Append(model.FullModelTypeName).AppendLine("), RuleManifest);");
+    }
+
+    private static string BuildRuleDescriptorLiteral(PropertyDescriptor property, RuleDescriptor rule)
+    {
+        var path = rule.Kind == RuleKind.ValidateEach
+            ? property.PropertyName + "[]"
+            : property.PropertyName;
+
+        var kind = rule.Kind switch
+        {
+            RuleKind.Required => "required",
+            RuleKind.NotEmpty => "not_empty",
+            RuleKind.NotWhiteSpace => "not_whitespace",
+            RuleKind.Email => "email",
+            RuleKind.MinLength => "minimum_length",
+            RuleKind.MaxLength => "maximum_length",
+            RuleKind.Length => "length",
+            RuleKind.Range => "inclusive_between",
+            RuleKind.Pattern => "pattern",
+            RuleKind.GreaterThan => "greater_than",
+            RuleKind.LessThan => "less_than",
+            RuleKind.ValidateNested => "nested",
+            RuleKind.ValidateEach => "collection",
+            _ => "predicate",
+        };
+
+        var severity = rule.Severity switch
+        {
+            1 => "global::eQuantic.Validation.ValidationSeverity.Warning",
+            2 => "global::eQuantic.Validation.ValidationSeverity.Information",
+            _ => "global::eQuantic.Validation.ValidationSeverity.Error",
+        };
+
+        var sb = new StringBuilder();
+        sb.Append("new global::eQuantic.Validation.ValidationRuleDescriptor(\"")
+            .Append(EscapeString(path)).Append("\", \"")
+            .Append(kind).Append("\", \"")
+            .Append(EscapeString(rule.Code)).Append("\", \"")
+            .Append(EscapeString(rule.MessageTemplate)).Append("\", ")
+            .Append(severity).Append(", ");
+
+        if (rule.Arguments.Count == 0 && rule.Pattern is null)
+        {
+            sb.Append("null, ");
+        }
+        else
+        {
+            sb.Append("new global::System.Collections.Generic.Dictionary<string, object?> { ");
+            var first = true;
+            foreach (var argument in rule.Arguments)
+            {
+                if (!first)
+                {
+                    sb.Append(", ");
+                }
+
+                sb.Append("[\"").Append(EscapeString(argument.Name)).Append("\"] = ").Append(argument.CSharpLiteral);
+                first = false;
+            }
+
+            if (rule.Pattern is not null)
+            {
+                if (!first)
+                {
+                    sb.Append(", ");
+                }
+
+                sb.Append("[\"Pattern\"] = @\"").Append(rule.Pattern.Replace("\"", "\"\"")).Append('"');
+            }
+
+            sb.Append(" }, ");
+        }
+
+        if (rule.Scenarios.Count == 0)
+        {
+            sb.Append("null, ");
+        }
+        else
+        {
+            sb.Append("new[] { ");
+            for (var index = 0; index < rule.Scenarios.Count; index++)
+            {
+                if (index > 0)
+                {
+                    sb.Append(", ");
+                }
+
+                sb.Append('"').Append(EscapeString(rule.Scenarios[index])).Append('"');
+            }
+
+            sb.Append(" }, ");
+        }
+
+        sb.Append("false, false, valueType: typeof(").Append(property.BareTypeName).Append("))");
+        return sb.ToString();
     }
 
     private static void ReportDiagnostics(SourceProductionContext context, EquatableArray<DiagnosticInfo> diagnostics)

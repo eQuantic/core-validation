@@ -203,6 +203,48 @@ validator.TestValidate(tooShort)
 
 ---
 
+## 📜 Rule Manifest: Validation as Data
+
+Every validator — fluent or source-generated — implements `IDescribableValidator` and publishes
+its rules as data: path, kind, stable error code, parameters, scenarios, severity and value type.
+Aggregate the registered validators and you have the expandable rule catalog of the whole
+application, queryable at runtime or exportable at build time:
+
+```csharp
+ValidatorDescription manifest = new CreateCustomerValidator().Describe();
+// → [ { Path: "Email", Kind: "email", Code: "customer.email.invalid", ... },
+//     { Path: "Address.PostalCode", Kind: "pattern", Arguments: { Pattern: "^[0-9]{5}$" } },
+//     { Path: "Contacts[].Email", Kind: "email", ... } ]
+```
+
+The manifest powers three things out of the box:
+
+1. **OpenAPI**: `AddValidationTransformer()` enriches schemas from attributes *and* from every
+   registered describable validator — fluent rules like `MinimumLength`, `Matches` and
+   `GreaterThan` land in the contract as `minLength`, `pattern` and `exclusiveMinimum`.
+2. **Error-code catalog**: stable codes with their paths and parameters, ready for living API
+   documentation and contract tests.
+3. **Client-side schemas**: export validators as TypeScript Zod schemas — validation written once
+   in C#, enforced in the browser. Opaque server-side rules (async uniqueness checks, custom
+   predicates) are surfaced as comments with their error codes, never silently dropped:
+
+```csharp
+string ts = ZodSchemaExporter.Export(new CheckoutValidator());
+// export const checkoutSchema = z.object({
+//   customerName: z.string().min(1).min(2).max(60),
+//   email: z.string().min(1).email() /* server-side: checkout.email.taken */,
+//   amount: z.number().gt(0),
+//   address: z.object({ street: z.string().min(1) }).optional(),
+//   items: z.array(z.object({ sku: z.string().min(1) })),
+// });
+// export type Checkout = z.infer<typeof checkoutSchema>;
+```
+
+Scenario-scoped rules are excluded by default and can be exported per scenario
+(`new ZodExportOptions { Scenario = "create" }`).
+
+---
+
 ## 📊 Observability & Metrics with OpenTelemetry
 
 Native metrics (`System.Diagnostics.Metrics`) and distributed tracing (`ActivitySource`) with **zero PII**:
@@ -246,6 +288,7 @@ arguments), which keeps localization consistent across the generated and fluent 
 | **Localization / i18n** | ⚠️ Global static resx | ✅ Per-request **`IStringLocalizer`** with lookup by stable code |
 | **Observability** | ❌ No native metrics | ✅ Integrated **OpenTelemetry Meter & ActivitySource** |
 | **Scenarios & PATCH** | ⚠️ Rigid `RuleSet` | ✅ Flexible `ForScenarios("create")` & `ForPaths("Address.City")` |
+| **Rules as data / client export** | ❌ Opaque runtime lambdas | ✅ `Describe()` manifest + **Zod/TypeScript export** |
 | **Trimming / Native AOT** | ⚠️ Heavy reflection | ✅ Trim/AOT analyzers enabled on core packages; generated path is reflection-free¹ |
 | **Concurrent execution** | ❌ Sequential only | ✅ Opt-in `ValidationExecutionMode.Parallel` (sequential by default) |
 

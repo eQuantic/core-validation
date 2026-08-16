@@ -54,6 +54,48 @@ internal sealed class PropertyRule<T, TProperty> : IValidationRule<T>
         return _scenarios.Count == 0 || _scenarios.Overlaps(context.Scenarios);
     }
 
+    public IEnumerable<ValidationRuleDescriptor> Describe()
+    {
+        var scenarios = _scenarios.Count == 0 ? null : _scenarios.ToArray();
+        var conditional = _condition is not null;
+
+        foreach (var check in _checks)
+        {
+            yield return new ValidationRuleDescriptor(
+                check.TargetPath ?? Path,
+                check.Kind,
+                check.Code,
+                check.Template,
+                check.Severity,
+                check.Arguments,
+                scenarios,
+                check.IsAsync,
+                conditional,
+                valueType: typeof(TProperty));
+        }
+
+        if (_childValidator is IDescribableValidator describable)
+        {
+            foreach (var rule in describable.Describe().Rules)
+            {
+                yield return Path.Length == 0 ? rule : rule.WithPathPrefix(Path, conditional);
+            }
+        }
+        else if (_childValidator is not null)
+        {
+            yield return new ValidationRuleDescriptor(
+                Path,
+                ValidationRuleKinds.Nested,
+                ValidationRuleKinds.Nested,
+                "{Property} is invalid.",
+                ValidationSeverity.Error,
+                arguments: null,
+                scenarios,
+                isAsync: false,
+                conditional);
+        }
+    }
+
     public IReadOnlyList<ValidationFailure> Validate(T instance, ValidationContext context)
     {
         if (!AppliesToInstance(instance, context))

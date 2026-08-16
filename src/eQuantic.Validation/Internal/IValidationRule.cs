@@ -4,6 +4,8 @@ internal interface IValidationRule<T>
 {
     bool IsAsync { get; }
 
+    IEnumerable<ValidationRuleDescriptor> Describe();
+
     bool AppliesTo(ValidationContext context);
 
     IReadOnlyList<ValidationFailure> Validate(T instance, ValidationContext context);

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="eQuantic.Validation.Testing" />
+    <InternalsVisibleTo Include="eQuantic.Validation.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>

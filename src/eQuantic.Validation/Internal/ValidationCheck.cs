@@ -26,6 +26,8 @@ internal sealed class ValidationCheck<T, TProperty>
 
     public string Template { get; set; }
 
+    public string Kind { get; set; } = ValidationRuleKinds.Predicate;
+
     public ValidationSeverity Severity { get; set; } = ValidationSeverity.Error;
 
     public IReadOnlyDictionary<string, object?> Arguments { get; }

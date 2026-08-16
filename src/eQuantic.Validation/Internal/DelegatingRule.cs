@@ -8,6 +8,11 @@ internal sealed class DelegatingRule<T> : IValidationRule<T>
 
     public bool IsAsync => true;
 
+    public IEnumerable<ValidationRuleDescriptor> Describe() =>
+        _validator is IDescribableValidator describable
+            ? describable.Describe().Rules
+            : Array.Empty<ValidationRuleDescriptor>();
+
     public bool AppliesTo(ValidationContext context) => true;
 
     public IReadOnlyList<ValidationFailure> Validate(T instance, ValidationContext context) => _validator.Validate(instance, context).Failures;

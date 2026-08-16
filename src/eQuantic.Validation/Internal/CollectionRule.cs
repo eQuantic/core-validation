@@ -43,6 +43,49 @@ internal sealed class CollectionRule<T, TElement> : IValidationRule<T>
     private bool AppliesToInstance(T instance, ValidationContext context) =>
         AppliesTo(context) && (_condition?.Invoke(instance, context) ?? true);
 
+    public IEnumerable<ValidationRuleDescriptor> Describe()
+    {
+        var scenarios = _scenarios.Count == 0 ? null : _scenarios.ToArray();
+        var conditional = _condition is not null;
+        var elementPath = Path + "[]";
+
+        foreach (var check in _checks)
+        {
+            yield return new ValidationRuleDescriptor(
+                elementPath,
+                check.Kind,
+                check.Code,
+                check.Template,
+                check.Severity,
+                check.Arguments,
+                scenarios,
+                check.IsAsync,
+                conditional,
+                valueType: typeof(TElement));
+        }
+
+        if (_childValidator is IDescribableValidator describable)
+        {
+            foreach (var rule in describable.Describe().Rules)
+            {
+                yield return rule.WithPathPrefix(elementPath, conditional);
+            }
+        }
+        else if (_childValidator is not null)
+        {
+            yield return new ValidationRuleDescriptor(
+                elementPath,
+                ValidationRuleKinds.Collection,
+                ValidationRuleKinds.Collection,
+                "{Property} is invalid.",
+                ValidationSeverity.Error,
+                arguments: null,
+                scenarios,
+                isAsync: false,
+                conditional);
+        }
+    }
+
     public IReadOnlyList<ValidationFailure> Validate(T instance, ValidationContext context)
     {
         if (!AppliesToInstance(instance, context))

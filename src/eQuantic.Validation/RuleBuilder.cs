@@ -23,7 +23,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
         return Add(
             static (_, value) => value is not null,
             ValidationCodes.Required,
-            "{Property} is required.");
+            "{Property} is required.",
+            kind: ValidationRuleKinds.Required);
     }
 
     /// <summary>Requires a non-empty value. Strings may still contain whitespace.</summary>
@@ -32,7 +33,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
         return Add(
             static (_, value) => !IsEmpty(value),
             ValidationCodes.NotEmpty,
-            "{Property} must not be empty.");
+            "{Property} must not be empty.",
+            kind: ValidationRuleKinds.NotEmpty);
     }
 
     /// <summary>Requires equality with <paramref name="expected"/>.</summary>
@@ -41,7 +43,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
         return Add(
             (_, value) => EqualityComparer<TProperty>.Default.Equals(value, expected),
             ValidationCodes.Predicate,
-            "{Property} has an unexpected value.");
+            "{Property} has an unexpected value.",
+            kind: ValidationRuleKinds.Equal);
     }
 
     /// <summary>Requires the value to be greater than <paramref name="minimum"/>.</summary>
@@ -51,7 +54,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             (_, value) => value is null || Comparer<TProperty>.Default.Compare(value, minimum) > 0,
             ValidationCodes.Range,
             "{Property} must be greater than {Minimum}.",
-            new Dictionary<string, object?> { ["Minimum"] = minimum });
+            new Dictionary<string, object?> { ["Minimum"] = minimum },
+            kind: ValidationRuleKinds.GreaterThan);
     }
 
     /// <summary>Requires the value to be less than <paramref name="maximum"/>.</summary>
@@ -61,7 +65,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             (_, value) => value is null || Comparer<TProperty>.Default.Compare(value, maximum) < 0,
             ValidationCodes.Range,
             "{Property} must be less than {Maximum}.",
-            new Dictionary<string, object?> { ["Maximum"] = maximum });
+            new Dictionary<string, object?> { ["Maximum"] = maximum },
+            kind: ValidationRuleKinds.LessThan);
     }
 
     /// <summary>Requires the value to be inside an inclusive range.</summary>
@@ -82,7 +87,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             {
                 ["Minimum"] = minimum,
                 ["Maximum"] = maximum,
-            });
+            },
+            kind: ValidationRuleKinds.InclusiveBetween);
     }
 
     /// <summary>Adds a synchronous custom predicate for this property.</summary>
@@ -163,7 +169,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             code,
             messageTemplate)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Create
         };
 
         _rule.Add(check);
@@ -209,7 +216,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             code,
             messageTemplate)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Create
         };
 
         _rule.Add(check);
@@ -251,7 +259,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             code,
             messageTemplate)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Parse
         };
 
         _rule.Add(check);
@@ -284,7 +293,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             code,
             messageTemplate)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Match
         };
 
         _rule.Add(check);
@@ -324,7 +334,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             messageTemplate,
             targetPath: targetPropertyPath)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Match
         };
 
         _rule.Add(check);
@@ -352,7 +363,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             code,
             messageTemplate)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Match
         };
 
         _rule.Add(check);
@@ -387,7 +399,8 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             messageTemplate,
             targetPath: targetPropertyPath)
         {
-            Severity = severity
+            Severity = severity,
+            Kind = ValidationRuleKinds.Match
         };
 
         _rule.Add(check);
@@ -479,9 +492,10 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
         Func<T, TProperty, bool> predicate,
         string code,
         string template,
-        IReadOnlyDictionary<string, object?>? arguments = null)
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        string kind = ValidationRuleKinds.Predicate)
     {
-        _rule.Add(new ValidationCheck<T, TProperty>(predicate, null, code, template, arguments));
+        _rule.Add(new ValidationCheck<T, TProperty>(predicate, null, code, template, arguments) { Kind = kind });
         return this;
     }
 

@@ -8,12 +8,16 @@ namespace eQuantic.Validation;
 /// validator instance is safe to reuse when its own dependencies are thread-safe.
 /// </summary>
 /// <typeparam name="T">The model to validate.</typeparam>
-public abstract class Validator<T> : IValidator<T>
+public abstract class Validator<T> : IValidator<T>, IDescribableValidator
 {
     private readonly List<IValidationRule<T>> _rules = new();
 
     /// <inheritdoc />
     public Type ValidatedType => typeof(T);
+
+    /// <summary>Returns every rule of this validator as data, including composed and nested rules.</summary>
+    public ValidatorDescription Describe() =>
+        new(typeof(T), _rules.SelectMany(static rule => rule.Describe()).ToArray());
 
     /// <summary>Begins a rule chain for a property or nested property.</summary>
     protected RuleBuilder<T, TProperty> RuleFor<TProperty>(Expression<Func<T, TProperty>> expression)
