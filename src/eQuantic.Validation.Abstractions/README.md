@@ -1,15 +1,13 @@
 # eQuantic.Validation.Abstractions
 
-Contratos estáveis e sem dependência de framework para o ecossistema eQuantic.Validation.
+Clean, framework-independent validation contracts and declarative attributes for the eQuantic.Validation ecosystem.
 
 ```bash
 dotnet add package eQuantic.Validation.Abstractions
 ```
 
-O pacote contém `IValidator<T>`, `ValidationContext`, `ValidationResult`, `ValidationFailure`,
-códigos e severidades. Use-o quando uma camada precisa **consumir** validação sem depender da DSL
-fluent ou de ASP.NET Core — por exemplo, contratos de Application/Domain, endpoints, workers e
-implementações próprias de validadores.
+This package defines `IValidator<T>`, `IValidatable<T>`, `ValidationContext`, `ValidationResult`, `ValidationFailure`, `ValidationSeverity`, standard codes, and declarative attributes (`[GenerateValidator]`, `[Required]`, `[Email]`, `[Range]`, etc.).
 
-Para a implementação fluent use `eQuantic.Validation`; para a integração web use
-`eQuantic.Validation.AspNetCore`.
+Use it when a project or domain layer needs to consume validation contracts without depending on the fluent DSL or ASP.NET Core — such as Application/Domain layers, messaging endpoints, workers, and custom validator implementations.
+
+For the fluent DSL engine, use `eQuantic.Validation`; for ASP.NET Core Minimal APIs / MVC integration, use `eQuantic.Validation.AspNetCore`.

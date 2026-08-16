@@ -4,15 +4,15 @@
 [![NuGet](https://img.shields.io/nuget/v/eQuantic.Validation.svg)](https://www.nuget.org/packages/eQuantic.Validation/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Validation moderna para .NET 10: validações geradas em tempo de compilação (Zero-Allocation), regras relacionais com Pattern Matching, OpenAPI 3.1 integrado, observabilidade nativa com OpenTelemetry, i18n e suporte total a Native AOT.**
+**Modern, high-performance validation for .NET 10: Compile-time Source Generated validators (Zero-Allocation), Relational Pattern Matching, Native OpenAPI 3.1 schema transformers, OpenTelemetry metrics and distributed tracing, per-request i18n, and full Native AOT compatibility.**
 
 ---
 
-## ⚡ Três formas inovadoras de validar:
+## ⚡ Three Innovative Ways to Validate:
 
-### 1. Validação Declarativa com Source Generator (Zero-Allocation & Native AOT)
+### 1. Declarative Validation with Roslyn Source Generator (Zero-Allocation & Native AOT)
 
-Elimina a necessidade de classes manuais para DTOs e Commands simples. O Roslyn Source Generator emite o código procedural em tempo de compilação — **zero reflection, zero expression trees e zero boxing**:
+Eliminates the need for hand-crafted validator classes on simple DTOs and Commands. The incremental Roslyn Source Generator emits procedural validation code at compile time — **zero reflection, zero runtime expression trees, and zero boxing**:
 
 ```csharp
 using eQuantic.Validation.Attributes;
@@ -27,9 +27,9 @@ public sealed record CreateCustomer(
 );
 ```
 
-### 2. Validação Fluente Code-First com Pattern Matching
+### 2. Code-First Fluent Validation with Relational Pattern Matching
 
-Permite expressar regras cross-field e condicionais complexas usando a sintaxe moderna de Pattern Matching do C#:
+Express complex conditional, relational, and cross-field rules cleanly using modern C# Pattern Matching syntax:
 
 ```csharp
 public sealed class PaymentValidator : Validator<PaymentRequest>
@@ -38,7 +38,7 @@ public sealed class PaymentValidator : Validator<PaymentRequest>
     {
         RuleFor(x => x.Amount).GreaterThan(0);
 
-        // Pattern Matching Relacional moderno:
+        // Modern Relational Pattern Matching:
         RuleForModel()
             .Match(
                 static p => p is { Method: "PIX", CardNumber: not null },
@@ -54,23 +54,23 @@ public sealed class PaymentValidator : Validator<PaymentRequest>
 }
 ```
 
-### 3. Validação de Value Objects (DDD) & Tipos Parsable
+### 3. Domain Value Objects (DDD) & Parsable Types Validation
 
-Valide a criação de Value Objects do seu domínio sem acoplar a camada de validação:
+Validate domain Value Objects creation and parsable types without coupling your validation layer to external domain frameworks:
 
 ```csharp
 public sealed class CreateCustomerValidator : Validator<CreateCustomerRequest>
 {
     public CreateCustomerValidator()
     {
-        // Factory de Value Object (falha se lançar exceção ou retornar null):
+        // Value Object factory (fails safely if factory throws or returns null):
         RuleFor(x => x.Email)
             .MustCreate(
                 email => EmailVo.Create(email),
                 code: "customer.email.invalid",
                 messageTemplate: "Invalid email format.");
 
-        // IParsable nativo do .NET (Guid, DateOnly, Money, etc.):
+        // Native .NET IParsable (Guid, DateOnly, Money, IPAddress, etc.):
         RuleFor(x => x.TransactionId)
             .MustParse<Guid>(
                 code: "customer.transaction_id.invalid",
@@ -79,7 +79,7 @@ public sealed class CreateCustomerValidator : Validator<CreateCustomerRequest>
 }
 ```
 
-### 4. Regras Assíncronas e I/O com Injeção de Dependência
+### 4. Asynchronous I/O Rules with Dependency Injection
 
 ```csharp
 public sealed class CreateCustomerValidator : Validator<CreateCustomer>
@@ -103,7 +103,7 @@ public sealed class CreateCustomerValidator : Validator<CreateCustomer>
 
 ---
 
-## 🚀 Integração com ASP.NET Core & Minimal APIs (.NET 10)
+## 🚀 ASP.NET Core & Minimal APIs Integration (.NET 10)
 
 ```csharp
 using eQuantic.Validation.AspNetCore;
@@ -111,13 +111,13 @@ using eQuantic.Validation.Generated;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Injeção de dependência automática gerada no build
+// 1. Compile-time generated Dependency Injection registration (Zero Assembly Scanning)
 builder.Services.AddGeneratedValidation();
 
-// 2. Localização / i18n automática (Accept-Language)
+// 2. Automatic localization / i18n (Accept-Language header)
 builder.Services.AddValidationLocalization<ValidationResources>();
 
-// 3. Integração com OpenAPI 3.1 (Scalar / Swagger)
+// 3. Native OpenAPI 3.1 schema transformer (Scalar / Swagger)
 builder.Services.AddOpenApi(options =>
 {
     options.AddValidationTransformer();
@@ -131,61 +131,61 @@ app.MapPost("/customers", (CreateCustomer command) => Results.Created())
 
 ---
 
-## 📊 Observabilidade & Métricas com OpenTelemetry
+## 📊 Observability & Metrics with OpenTelemetry
 
-Métricas nativas (`System.Diagnostics.Metrics`) e distributed tracing (`ActivitySource`) com **Zero PII**:
+Native zero-overhead metrics (`System.Diagnostics.Metrics`) and distributed tracing (`ActivitySource`) with **Zero PII**:
 
-- `validation.requests.total`: Contador de validações por tipo e resultado.
-- `validation.failures.total`: Breakdown de falhas por código de erro estável.
-- `validation.duration.ms`: Histograma de latência em milissegundos.
+- `validation.requests.total`: Counter for validation requests partitioned by model type and outcome.
+- `validation.failures.total`: Breakdown of validation failures by stable error code.
+- `validation.duration.ms`: Latency histogram in milliseconds.
 
 ---
 
-## 🏎️ Benchmarks Científicos (BenchmarkDotNet no .NET 10)
+## 🏎️ Scientific Benchmarks (BenchmarkDotNet on .NET 10)
 
-Resultados oficiais executados com `BenchmarkDotNet v0.14.0` no **.NET 10.0** (Apple M4 Pro Arm64):
+Official results measured with `BenchmarkDotNet v0.14.0` on **.NET 10.0** (Apple M4 Pro Arm64):
 
-| Método / Abordagem | Cenário | Tempo Médio (`Mean`) | Memória Alocada (`Allocated`) | Performance vs FluentValidation |
+| Method / Approach | Scenario | Mean Latency (`Mean`) | Memory Allocated (`Allocated`) | Performance vs FluentValidation |
 | :--- | :---: | :---:| :---: | :---: |
-| 🥇 **eQuantic (Source Generated)** | **Válido** | **87.22 ns** | **32 B** | 🚀 **2.7x mais rápido / 95% menos memória** |
-| 🥈 **eQuantic (Fluent DSL)** | **Válido** | **136.85 ns** | **160 B** | ⚡ **1.7x mais rápido / 77% menos memória** |
-| 🥉 **FluentValidation** | **Válido** | **235.36 ns** | **696 B** | *Baseline* |
+| 🥇 **eQuantic (Source Generated)** | **Valid** | **87.22 ns** | **32 B** | 🚀 **2.7x faster / 95% less memory** |
+| 🥈 **eQuantic (Fluent DSL)** | **Valid** | **136.85 ns** | **160 B** | ⚡ **1.7x faster / 77% less memory** |
+| 🥉 **FluentValidation** | **Valid** | **235.36 ns** | **696 B** | *Baseline* |
 | | | | | |
-| 🥇 **eQuantic (Source Generated)** | **Inválido (Erros)** | **175.89 ns** | **1.168 B** | 🚀 **16.5x mais rápido / 91% menos memória** |
-| 🥈 **eQuantic (Fluent DSL)** | **Inválido (Erros)** | **1.108 µs** | **5.536 B** | ⚡ **2.6x mais rápido / 56% menos memória** |
-| 🥉 **FluentValidation** | **Inválido (Erros)** | **2.899 µs** | **12.600 B** | *Baseline* |
+| 🥇 **eQuantic (Source Generated)** | **Invalid (Failures)** | **175.89 ns** | **1,168 B** | 🚀 **16.5x faster / 91% less memory** |
+| 🥈 **eQuantic (Fluent DSL)** | **Invalid (Failures)** | **1.108 µs** | **5,536 B** | ⚡ **2.6x faster / 56% less memory** |
+| 🥉 **FluentValidation** | **Invalid (Failures)** | **2.899 µs** | **12,600 B** | *Baseline* |
 
-> *Para reproduzir os testes em sua máquina, execute `dotnet run -c Release --project benchmarks/eQuantic.Validation.Benchmarks`.*
+> *To reproduce benchmarks on your machine, run: `dotnet run -c Release --project benchmarks/eQuantic.Validation.Benchmarks`.*
 
 ---
 
-## 🌟 Comparativo de Recursos: eQuantic.Validation vs. FluentValidation
+## 🌟 Feature Comparison: eQuantic.Validation vs. FluentValidation
 
-| Recurso | FluentValidation tradicional | eQuantic.Validation |
+| Feature | Traditional FluentValidation | eQuantic.Validation |
 | --- | --- | --- |
-| **Geração de Código (Build)** | ❌ Apenas runtime | ✅ **Zero-Allocation Source Generator** com `[GenerateValidator]` |
-| **Pattern Matching Cross-Field** | ❌ `.When(...)` aninhado e verboso | ✅ **`RuleForModel().Match(p => p is { ... })`** idiomático |
-| **OpenAPI 3.1 Nativo** | ⚠️ Requer bibliotecas de terceiros | ✅ **`AddValidationTransformer()`** nativo (.NET 10) |
-| **Erros Estruturados** | ❌ Focado em strings genéricas | ✅ `Code`, `Path`, `Severity` e `Arguments` seguros |
-| **Localização / i18n** | ⚠️ Resx estático global | ✅ **`IStringLocalizer` / `Accept-Language`** por requisição |
-| **Observabilidade** | ❌ Nenhuma métrica nativa | ✅ **OpenTelemetry Meter & Tracing** integrados |
-| **Cenários & PATCH** | ⚠️ `RuleSet` rígido | ✅ `ForScenarios("create")` e `ForPaths("Address.City")` |
-| **Compatibilidade AOT** | ⚠️ Reflection intensivo | ✅ **100% Native AOT & Trimming-ready** |
-| **Execução Concorrente** | ❌ Apenas sequencial | ✅ `ValidationExecutionMode.Parallel` com `Task.WhenAll` |
+| **Code Generation (Build-time)** | ❌ Runtime only | ✅ **Zero-Allocation Source Generator** via `[GenerateValidator]` |
+| **Relational Pattern Matching** | ❌ Nested & verbose `.When(...)` | ✅ Idiomatic **`RuleForModel().Match(p => p is { ... })`** |
+| **Native OpenAPI 3.1** | ⚠️ Requires 3rd party libraries | ✅ Native **`AddValidationTransformer()`** (.NET 10) |
+| **Structured Errors** | ❌ Primarily plain strings | ✅ Strongly-typed `Code`, `Path`, `Severity`, and `Arguments` |
+| **Localization / i18n** | ⚠️ Global static resx | ✅ Per-request **`IStringLocalizer` / `Accept-Language`** |
+| **Observability** | ❌ No native metrics | ✅ Integrated **OpenTelemetry Meter & ActivitySource** |
+| **Scenarios & PATCH** | ⚠️ Rigid `RuleSet` | ✅ Flexible `ForScenarios("create")` & `ForPaths("Address.City")` |
+| **Native AOT & Trimming** | ⚠️ Heavy reflection | ✅ **100% Native AOT & Trimming Ready** |
+| **Concurrent Execution** | ❌ Sequential only | ✅ `ValidationExecutionMode.Parallel` via `Task.WhenAll` |
 
 ---
 
-## 📦 Pacotes
+## 📦 Packages
 
-| Pacote | Finalidade |
+| Package | Purpose |
 | --- | --- |
-| `eQuantic.Validation.Abstractions` | Contratos (`IValidator<T>`, `IValidatable<T>`, `ValidationResult`) e atributos (`[GenerateValidator]`, `[Required]`, `[Email]`, etc.). |
-| `eQuantic.Validation` | Motor da DSL fluente, pattern matching, regras assíncronas e composição. |
-| `eQuantic.Validation.AspNetCore` | Minimal APIs (`RequireValidation`), MVC Action Filter, OpenAPI transformer, i18n e OpenTelemetry. |
-| `eQuantic.Validation.Generator` | Roslyn Source Generator para validação procedural e registro DI zero-reflection. |
+| `eQuantic.Validation.Abstractions` | Clean contracts (`IValidator<T>`, `IValidatable<T>`, `ValidationResult`) and declarative attributes (`[GenerateValidator]`, `[Required]`, `[Email]`, etc.). |
+| `eQuantic.Validation` | Fluent DSL engine, pattern matching, asynchronous rules, Value Objects, and composition. |
+| `eQuantic.Validation.AspNetCore` | Minimal APIs (`RequireValidation`), MVC Action Filter, OpenAPI transformer, i18n, and OpenTelemetry. |
+| `eQuantic.Validation.Generator` | Roslyn Source Generator for procedural zero-reflection validation and compile-time DI registration. |
 
 ---
 
-## 📄 Licença
+## 📄 License
 
-MIT © eQuantic Tech. Consulte [LICENSE](LICENSE).
+MIT © eQuantic Tech. See [LICENSE](LICENSE).

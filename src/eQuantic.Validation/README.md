@@ -1,6 +1,6 @@
 # eQuantic.Validation
 
-O motor de validação independente de framework da família eQuantic.
+Framework-independent fluent validation engine for the eQuantic ecosystem.
 
 ```bash
 dotnet add package eQuantic.Validation
@@ -20,11 +20,8 @@ public sealed class CreateOrderValidator : Validator<CreateOrder>
 var result = await new CreateOrderValidator().ValidateAsync(order, cancellationToken: cancellationToken);
 ```
 
-Use regras fluent para lógica de domínio e regras que dependem de serviços. Para DTOs que já usam
-`System.ComponentModel.DataAnnotations`, registre ou instancie `AttributeValidator<T>` e obtenha o
-mesmo `ValidationResult` estruturado.
+Use fluent rules for domain logic, cross-field pattern matching, Value Objects, and service-dependent rules. For DTOs with `System.ComponentModel.DataAnnotations`, instantiate or register `AttributeValidator<T>` to produce the same structured `ValidationResult`.
 
-O pacote implementa `eQuantic.Validation.Abstractions` e não tem dependência de ASP.NET Core.
-Para endpoints e controllers use `eQuantic.Validation.AspNetCore`.
+This package implements `eQuantic.Validation.Abstractions` and has zero dependency on ASP.NET Core. For web endpoints and controllers, use `eQuantic.Validation.AspNetCore`.
 
-Documentação completa: <https://github.com/eQuantic/core-validation>
+Complete documentation: <https://github.com/eQuantic/core-validation>

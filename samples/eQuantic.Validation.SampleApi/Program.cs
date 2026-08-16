@@ -5,13 +5,13 @@ using eQuantic.Validation.Generated;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuração do OpenAPI e validações
+// OpenAPI and validation configuration
 builder.Services.AddOpenApi(options =>
 {
     options.AddValidationTransformer();
 });
 
-// Registra todos os validadores gerados e manuais em tempo de compilação sem reflection:
+// Registers all generated and manual validators at compile-time with zero reflection:
 builder.Services.AddGeneratedValidation();
 
 var app = builder.Build();
@@ -23,7 +23,7 @@ if (app.Environment.IsDevelopment())
 
 var v1 = app.MapGroup("/api/v1");
 
-// 1. Endpoint usando validação gerada por Source Generator (Zero-Allocation)
+// 1. Endpoint using compile-time Source Generated validation (Zero-Allocation)
 v1.MapPost("/customers", (CreateCustomerRequest request) =>
 {
     return Results.Created($"/api/v1/customers/{Guid.NewGuid()}", new
@@ -33,7 +33,7 @@ v1.MapPost("/customers", (CreateCustomerRequest request) =>
     });
 }).RequireValidation("create");
 
-// 2. Endpoint usando validador fluente com Pattern Matching cross-field
+// 2. Endpoint using fluent validator with cross-field Pattern Matching
 v1.MapPost("/payments", (ProcessPaymentRequest request) =>
 {
     return Results.Ok(new
@@ -43,7 +43,7 @@ v1.MapPost("/payments", (ProcessPaymentRequest request) =>
     });
 }).RequireValidation();
 
-// 3. Endpoint usando validação aninhada e coleções
+// 3. Endpoint using nested models and collection validation
 v1.MapPost("/orders", (CreateOrderRequest request) =>
 {
     return Results.Created($"/api/v1/orders/{Guid.NewGuid()}", new
@@ -56,10 +56,10 @@ v1.MapPost("/orders", (CreateOrderRequest request) =>
 app.Run();
 
 // ==========================================
-// Modelos e Validadores
+// Models and Validators
 // ==========================================
 
-// Modelo 1: Source Generated Declarativo
+// Model 1: Declarative Source Generated Model
 [GenerateValidator]
 public sealed record CreateCustomerRequest(
     [Required, NotWhiteSpace] string Name,
@@ -68,7 +68,7 @@ public sealed record CreateCustomerRequest(
     [Pattern("^VIP-", Scenarios = ["vip"], Code = "customer.vip.prefix")] string? MembershipCode = null
 );
 
-// Modelo 2: Validador com Pattern Matching Relacional
+// Model 2: Relational Pattern Matching Validator
 public sealed record ProcessPaymentRequest(
     string Method,
     decimal Amount,
@@ -89,7 +89,7 @@ public sealed class ProcessPaymentValidator : Validator<ProcessPaymentRequest>
             .GreaterThan(0)
             .WithCode("payment.amount.invalid");
 
-        // Pattern Matching Relacional moderno:
+        // Modern relational pattern matching:
         RuleForModel()
             .Match(
                 static p => p is { Method: "PIX", CardNumber: not null },
@@ -109,7 +109,7 @@ public sealed class ProcessPaymentValidator : Validator<ProcessPaymentRequest>
     }
 }
 
-// Modelo 3: Modelos aninhados e coleções com Source Generator
+// Model 3: Nested models and collections with Source Generator
 [GenerateValidator]
 public sealed record OrderItemDto(
     [Required, NotWhiteSpace] string ProductSku,

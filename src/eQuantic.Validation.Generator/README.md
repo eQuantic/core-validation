@@ -1,6 +1,6 @@
 # eQuantic.Validation.Generator
 
-Gerador incremental que produz validadores e cria o registro DI em tempo de compilação sem assembly scanning. Ideal para aplicações trimadas ou Native AOT.
+Incremental Roslyn Source Generator producing zero-allocation validators and compile-time DI registration without assembly scanning. Fully compatible with Native AOT and trimmed applications.
 
 ```xml
 <PackageReference Include="eQuantic.Validation.Generator"
@@ -10,10 +10,10 @@ Gerador incremental que produz validadores e cria o registro DI em tempo de comp
                   ReferenceOutputAssembly="false" />
 ```
 
-Instale-o no projeto de composição (por exemplo, a API) que referencia `eQuantic.Validation.AspNetCore` e os assemblies que contêm seus modelos e validadores:
+Install it in your application entrypoint project (e.g. your ASP.NET Core API) that references `eQuantic.Validation.AspNetCore` and the assemblies containing your models and validators:
 
 ```csharp
 services.AddGeneratedValidation();
 ```
 
-Esse método registra todos os validadores gerados e manuais da aplicação e de assemblies referenciados como `scoped`, sem reflexão em runtime.
+This extension method registers all generated and manual validators from the current assembly and referenced projects as `scoped` services, with zero runtime reflection.
