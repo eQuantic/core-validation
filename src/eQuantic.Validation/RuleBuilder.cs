@@ -1,18 +1,18 @@
 using System.Collections;
-using System.Text.RegularExpressions;
 using eQuantic.Validation.Internal;
 
 namespace eQuantic.Validation;
 
-/// <summary>Fluent builder for a property validation rule.</summary>
+/// <summary>
+/// Fluent builder for a property validation rule. Comparison and shape rules are null-permissive:
+/// a <see langword="null"/> value passes, combine with <see cref="NotNull"/> or <see cref="NotEmpty"/>
+/// to require a value. String-specific rules live in <see cref="StringRuleExtensions"/> and only
+/// bind to <c>string</c> properties.
+/// </summary>
 /// <typeparam name="T">The model being validated.</typeparam>
 /// <typeparam name="TProperty">The property type.</typeparam>
-public sealed class RuleBuilder<T, TProperty>
+public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
 {
-    private static readonly Regex EmailPattern = new(
-        @"^[^\s@]+@[^\s@]+\.[^\s@]+$",
-        RegexOptions.CultureInvariant);
-
     private readonly PropertyRule<T, TProperty> _rule;
 
     internal RuleBuilder(PropertyRule<T, TProperty> rule) => _rule = rule;
@@ -33,88 +33,6 @@ public sealed class RuleBuilder<T, TProperty>
             static (_, value) => !IsEmpty(value),
             ValidationCodes.NotEmpty,
             "{Property} must not be empty.");
-    }
-
-    /// <summary>Requires a non-empty, non-whitespace string.</summary>
-    public RuleBuilder<T, TProperty> NotWhiteSpace()
-    {
-        return Add(
-            static (_, value) => value is string text && !string.IsNullOrWhiteSpace(text),
-            ValidationCodes.NotWhiteSpace,
-            "{Property} must not be blank.");
-    }
-
-    /// <summary>Requires a non-empty value that has a conventional email address shape.</summary>
-    public RuleBuilder<T, TProperty> Email()
-    {
-        return Add(
-            static (_, value) => value is string text && EmailPattern.IsMatch(text),
-            ValidationCodes.Email,
-            "{Property} must be a valid email address.");
-    }
-
-    /// <summary>Requires a string to contain at least <paramref name="minimumLength"/> characters.</summary>
-    public RuleBuilder<T, TProperty> MinimumLength(int minimumLength)
-    {
-        if (minimumLength < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(minimumLength));
-        }
-
-        return Add(
-            (_, value) => value is null || value is string text && text.Length >= minimumLength,
-            ValidationCodes.MinimumLength,
-            "{Property} must contain at least {MinimumLength} characters.",
-            new Dictionary<string, object?> { ["MinimumLength"] = minimumLength });
-    }
-
-    /// <summary>Requires a string to contain no more than <paramref name="maximumLength"/> characters.</summary>
-    public RuleBuilder<T, TProperty> MaximumLength(int maximumLength)
-    {
-        if (maximumLength < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maximumLength));
-        }
-
-        return Add(
-            (_, value) => value is null || value is string text && text.Length <= maximumLength,
-            ValidationCodes.MaximumLength,
-            "{Property} must contain no more than {MaximumLength} characters.",
-            new Dictionary<string, object?> { ["MaximumLength"] = maximumLength });
-    }
-
-    /// <summary>Requires a string length to be inside an inclusive range.</summary>
-    public RuleBuilder<T, TProperty> Length(int minimumLength, int maximumLength)
-    {
-        if (minimumLength < 0 || maximumLength < minimumLength)
-        {
-            throw new ArgumentOutOfRangeException(nameof(minimumLength));
-        }
-
-        return Add(
-            (_, value) => value is null || value is string text && text.Length >= minimumLength && text.Length <= maximumLength,
-            ValidationCodes.Range,
-            "{Property} must contain between {MinimumLength} and {MaximumLength} characters.",
-            new Dictionary<string, object?>
-            {
-                ["MinimumLength"] = minimumLength,
-                ["MaximumLength"] = maximumLength,
-            });
-    }
-
-    /// <summary>Requires a string value to match <paramref name="pattern"/>.</summary>
-    public RuleBuilder<T, TProperty> Matches(string pattern, RegexOptions options = RegexOptions.CultureInvariant)
-    {
-        if (string.IsNullOrWhiteSpace(pattern))
-        {
-            throw new ArgumentException("A regular expression pattern is required.", nameof(pattern));
-        }
-
-        var regex = new Regex(pattern, options);
-        return Add(
-            (_, value) => value is null || value is string text && regex.IsMatch(text),
-            ValidationCodes.Pattern,
-            "{Property} has an invalid format.");
     }
 
     /// <summary>Requires equality with <paramref name="expected"/>.</summary>
@@ -557,7 +475,7 @@ public sealed class RuleBuilder<T, TProperty>
         return this;
     }
 
-    private RuleBuilder<T, TProperty> Add(
+    internal RuleBuilder<T, TProperty> Add(
         Func<T, TProperty, bool> predicate,
         string code,
         string template,

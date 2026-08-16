@@ -1,4 +1,4 @@
-namespace eQuantic.Validation.AspNetCore;
+namespace eQuantic.Validation;
 
 internal sealed class ValidationRegistration
 {

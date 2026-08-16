@@ -119,18 +119,18 @@ public static class OpenApiValidationExtensions
                 concretePropSchema.MaxLength = lengthAttr.MaximumLength;
             }
 
-            // Range
+            // Range (invariant culture: OpenAPI numeric bounds must use '.' regardless of host locale)
             var rangeAttr = propertyInfo?.GetCustomAttribute<RangeAttribute>() ??
                             paramInfo?.GetCustomAttribute<RangeAttribute>();
             if (rangeAttr is not null)
             {
-                if (decimal.TryParse(rangeAttr.Minimum?.ToString(), out var min))
+                if (rangeAttr.Minimum is not null)
                 {
-                    concretePropSchema.Minimum = min.ToString();
+                    concretePropSchema.Minimum = Convert.ToString(rangeAttr.Minimum, System.Globalization.CultureInfo.InvariantCulture);
                 }
-                if (decimal.TryParse(rangeAttr.Maximum?.ToString(), out var max))
+                if (rangeAttr.Maximum is not null)
                 {
-                    concretePropSchema.Maximum = max.ToString();
+                    concretePropSchema.Maximum = Convert.ToString(rangeAttr.Maximum, System.Globalization.CultureInfo.InvariantCulture);
                 }
             }
 

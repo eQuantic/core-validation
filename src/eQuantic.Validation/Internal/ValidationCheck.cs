@@ -60,7 +60,7 @@ internal sealed class ValidationCheck<T, TProperty>
             ? displayName
             : effectivePath.Split('.').Last();
 
-        var message = MessageFormatter.Format(context, effectivePath, effectiveName, Code, Template, Arguments);
+        var message = ValidationMessages.Format(context, effectivePath, effectiveName, Code, Template, Arguments);
         return new ValidationFailure(effectivePath, Code, message, Severity, Arguments);
     }
 }

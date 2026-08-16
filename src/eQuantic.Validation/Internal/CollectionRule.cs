@@ -5,6 +5,7 @@ internal sealed class CollectionRule<T, TElement> : IValidationRule<T>
     private readonly Func<T, IEnumerable<TElement>?> _accessor;
     private readonly List<ValidationCheck<T, TElement>> _checks = new();
     private readonly HashSet<string> _scenarios = new(StringComparer.OrdinalIgnoreCase);
+    private Func<T, ValidationContext, bool>? _condition;
     private IValidator<TElement>? _childValidator;
 
     public CollectionRule(string path, Func<T, IEnumerable<TElement>?> accessor)
@@ -32,13 +33,19 @@ internal sealed class CollectionRule<T, TElement> : IValidationRule<T>
     public void SetChildValidator(IValidator<TElement> validator) =>
         _childValidator = validator ?? throw new ArgumentNullException(nameof(validator));
 
+    public void SetCondition(Func<T, ValidationContext, bool> condition) =>
+        _condition = condition ?? throw new ArgumentNullException(nameof(condition));
+
     public bool AppliesTo(ValidationContext context) =>
         context.IncludesPath(Path) &&
         (_scenarios.Count == 0 || _scenarios.Overlaps(context.Scenarios));
 
+    private bool AppliesToInstance(T instance, ValidationContext context) =>
+        AppliesTo(context) && (_condition?.Invoke(instance, context) ?? true);
+
     public IReadOnlyList<ValidationFailure> Validate(T instance, ValidationContext context)
     {
-        if (!AppliesTo(context))
+        if (!AppliesToInstance(instance, context))
         {
             return Array.Empty<ValidationFailure>();
         }
@@ -90,7 +97,7 @@ internal sealed class CollectionRule<T, TElement> : IValidationRule<T>
         ValidationContext context,
         CancellationToken cancellationToken)
     {
-        if (!AppliesTo(context))
+        if (!AppliesToInstance(instance, context))
         {
             return Array.Empty<ValidationFailure>();
         }

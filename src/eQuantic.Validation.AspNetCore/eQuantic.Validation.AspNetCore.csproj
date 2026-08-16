@@ -13,6 +13,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\eQuantic.Validation.Abstractions\eQuantic.Validation.Abstractions.csproj" />
+    <ProjectReference Include="..\eQuantic.Validation\eQuantic.Validation.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">

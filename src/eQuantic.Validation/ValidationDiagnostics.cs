@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace eQuantic.Validation.AspNetCore;
+namespace eQuantic.Validation;
 
 /// <summary>
-/// OpenTelemetry Metrics and Tracing diagnostics for eQuantic.Validation.
+/// OpenTelemetry metrics and tracing instrumentation for eQuantic.Validation.
 /// </summary>
 public static class ValidationDiagnostics
 {
@@ -14,8 +14,8 @@ public static class ValidationDiagnostics
     /// <summary>ActivitySource name used for OpenTelemetry distributed tracing.</summary>
     public const string ActivitySourceName = "eQuantic.Validation";
 
-    /// <summary>Instrumentation version.</summary>
-    public const string Version = "1.0.0";
+    private static readonly string Version =
+        typeof(ValidationDiagnostics).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     /// <summary>Meter instance for recording validation metrics.</summary>
     public static readonly Meter Meter = new(MeterName, Version);
@@ -26,18 +26,18 @@ public static class ValidationDiagnostics
     /// <summary>Total number of validation requests executed.</summary>
     public static readonly Counter<long> ValidationsTotal = Meter.CreateCounter<long>(
         "validation.requests.total",
-        "count",
+        "{request}",
         "Total number of validation requests executed.");
 
     /// <summary>Total number of validation failures broken down by error code.</summary>
     public static readonly Counter<long> FailuresTotal = Meter.CreateCounter<long>(
         "validation.failures.total",
-        "count",
+        "{failure}",
         "Total number of validation failures by error code.");
 
-    /// <summary>Histogram tracking validation execution duration in milliseconds.</summary>
+    /// <summary>Histogram tracking validation execution duration in seconds (OTel convention).</summary>
     public static readonly Histogram<double> ValidationDuration = Meter.CreateHistogram<double>(
-        "validation.duration.ms",
-        "ms",
-        "Duration of validation execution in milliseconds.");
+        "validation.duration",
+        "s",
+        "Duration of validation execution in seconds.");
 }

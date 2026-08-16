@@ -68,6 +68,25 @@ public sealed class CollectionRuleBuilder<T, TElement>
         return this;
     }
 
+    /// <summary>Changes the severity for the immediately preceding element validator.</summary>
+    public CollectionRuleBuilder<T, TElement> WithSeverity(ValidationSeverity severity)
+    {
+        GetLastCheck().Severity = severity;
+        return this;
+    }
+
+    /// <summary>Runs the collection rule only when the model condition is true.</summary>
+    public CollectionRuleBuilder<T, TElement> When(Func<T, bool> condition)
+    {
+        if (condition is null)
+        {
+            throw new ArgumentNullException(nameof(condition));
+        }
+
+        _rule.SetCondition((instance, _) => condition(instance));
+        return this;
+    }
+
     /// <summary>Runs the collection rule only for the supplied scenarios.</summary>
     public CollectionRuleBuilder<T, TElement> ForScenarios(params string[] scenarios)
     {

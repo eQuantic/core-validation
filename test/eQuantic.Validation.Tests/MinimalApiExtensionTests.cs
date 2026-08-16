@@ -12,7 +12,7 @@ public sealed class MinimalApiExtensionTests
     public void RequireValidation_can_be_added_to_a_route_handler()
     {
         var builder = WebApplication.CreateBuilder();
-        builder.Services.AddValidation();
+        builder.Services.AddValidationDispatcher();
         using var app = builder.Build();
 
         var endpoint = app.MapPost("/orders", (MinimalApiRequest request) => Results.Ok(request));

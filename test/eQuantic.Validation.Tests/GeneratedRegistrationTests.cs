@@ -29,10 +29,14 @@ public sealed class GeneratedRegistrationTests
     }
 
     [Test]
-    public async Task AddGeneratedValidation_registers_public_validators_from_referenced_assemblies()
+    public async Task Validators_from_referenced_assemblies_are_opt_in_via_AddValidator()
     {
         var services = new ServiceCollection();
         services.AddGeneratedValidation();
+
+        // Referenced assemblies are never scanned or auto-registered; each one is composed
+        // explicitly (or exposes its own registration method).
+        services.AddValidator<ReferencedGeneratorRequest, ReferencedGeneratorValidator>();
 
         await using var provider = services.BuildServiceProvider();
         await using var scope = provider.CreateAsyncScope();

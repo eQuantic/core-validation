@@ -1,14 +1,15 @@
-using System.Collections.Immutable;
-using System.Text;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
 
 namespace eQuantic.Validation.Generator;
 
 /// <summary>
-/// Incremental generator that generates zero-allocation validators and explicit DI registrations.
+/// Incremental generator that produces reflection-free validators for types annotated with
+/// <c>[GenerateValidator]</c> and explicit DI registrations for every validator declared in the
+/// compiling assembly. Referenced assemblies are intentionally not scanned: registration is
+/// opt-in per assembly, keeping the pipeline incremental and free of surprise registrations.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
@@ -16,59 +17,55 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
     private const string ValidatorNamespace = "eQuantic.Validation";
     private const string ValidatorInterfaceName = "IValidator`1";
     private const string GenerateValidatorAttributeName = "eQuantic.Validation.Attributes.GenerateValidatorAttribute";
-    private const string AspNetCoreExtensionsType = "eQuantic.Validation.AspNetCore.ServiceCollectionExtensions";
+    private const string CoreExtensionsType = "eQuantic.Validation.ServiceCollectionExtensions";
     private const string ServiceCollectionType = "Microsoft.Extensions.DependencyInjection.IServiceCollection";
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // 1. Discover classes implementing IValidator<T> directly (manual validators)
+        var models = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                GenerateValidatorAttributeName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (syntaxContext, cancellationToken) => CreateModelDescriptor(syntaxContext, cancellationToken))
+            .Where(static descriptor => descriptor is not null)
+            .Select(static (descriptor, _) => descriptor!);
+
         var manualValidators = context.SyntaxProvider
             .CreateSyntaxProvider(
                 static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
-                static (syntaxContext, _) => CreateManualValidatorDescriptor(syntaxContext))
+                static (syntaxContext, cancellationToken) => CreateManualValidatorDescriptor(syntaxContext, cancellationToken))
             .Where(static descriptor => descriptor is not null)
             .Select(static (descriptor, _) => descriptor!);
 
-        // 2. Discover classes/records annotated with [GenerateValidator]
-        var modelsToGenerate = context.SyntaxProvider
-            .CreateSyntaxProvider(
-                static (node, _) => node is TypeDeclarationSyntax { AttributeLists.Count: > 0 },
-                static (syntaxContext, _) => CreateModelDescriptor(syntaxContext))
-            .Where(static descriptor => descriptor is not null)
-            .Select(static (descriptor, _) => descriptor!);
+        // Cheap capability flags projected from the compilation; the booleans have value
+        // equality, so downstream registration output stays cached until they actually change.
+        var capabilities = context.CompilationProvider.Select(static (compilation, _) =>
+            new RegistrationCapabilities(
+                compilation.GetTypeByMetadataName(CoreExtensionsType) is not null,
+                compilation.GetTypeByMetadataName(ServiceCollectionType) is not null));
 
-        // 3. Generate validation code for models annotated with [GenerateValidator]
-        context.RegisterSourceOutput(modelsToGenerate, static (productionContext, model) =>
+        context.RegisterSourceOutput(models, static (productionContext, model) =>
+            ValidatorEmitter.EmitModelValidator(productionContext, model));
+
+        var registrationInputs = manualValidators.Collect().Combine(models.Collect()).Combine(capabilities);
+        context.RegisterSourceOutput(registrationInputs, static (productionContext, source) =>
         {
-            GenerateModelValidator(productionContext, model);
+            var ((manuals, generatedModels), registrationCapabilities) = source;
+            ValidatorEmitter.EmitRegistrations(productionContext, manuals, generatedModels, registrationCapabilities);
         });
-
-        // 4. Combine manual validators + generated validators to emit DI extensions
-        var allDiscovered = manualValidators.Collect().Combine(modelsToGenerate.Collect());
-
-        context.RegisterSourceOutput(
-            context.CompilationProvider.Combine(allDiscovered),
-            static (productionContext, source) =>
-            {
-                var compilation = source.Left;
-                var (manuals, generatedModels) = source.Right;
-                GenerateRegistrations(productionContext, compilation, manuals, generatedModels);
-            });
     }
 
-    private static ValidatorDescriptor? CreateManualValidatorDescriptor(GeneratorSyntaxContext context)
+    private static ValidatorDescriptor? CreateManualValidatorDescriptor(
+        GeneratorSyntaxContext context,
+        CancellationToken cancellationToken)
     {
-        return context.SemanticModel.GetDeclaredSymbol(context.Node) is INamedTypeSymbol validatorType
-            ? CreateManualValidatorDescriptor(validatorType, requirePublic: false)
-            : null;
-    }
+        if (context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is not INamedTypeSymbol validatorType)
+        {
+            return null;
+        }
 
-    private static ValidatorDescriptor? CreateManualValidatorDescriptor(INamedTypeSymbol validatorType, bool requirePublic)
-    {
-        if (validatorType.IsAbstract ||
-            validatorType.IsGenericType ||
-            !IsAccessible(validatorType, requirePublic))
+        if (validatorType.IsAbstract || validatorType.IsGenericType || !IsAccessible(validatorType))
         {
             return null;
         }
@@ -80,7 +77,7 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
         if (validatorInterface is null ||
             validatorInterface.TypeArguments[0] is not INamedTypeSymbol modelType ||
             modelType.TypeKind == TypeKind.Error ||
-            !IsAccessible(modelType, requirePublic))
+            !IsAccessible(modelType))
         {
             return null;
         }
@@ -90,24 +87,30 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
             modelType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
     }
 
-    private static ModelValidationDescriptor? CreateModelDescriptor(GeneratorSyntaxContext context)
+    private static ModelDescriptor? CreateModelDescriptor(
+        GeneratorAttributeSyntaxContext context,
+        CancellationToken cancellationToken)
     {
-        if (context.SemanticModel.GetDeclaredSymbol(context.Node) is not INamedTypeSymbol typeSymbol)
+        if (context.TargetSymbol is not INamedTypeSymbol typeSymbol)
         {
             return null;
         }
 
-        var hasGenerateAttribute = typeSymbol.GetAttributes().Any(static attr =>
-            attr.AttributeClass?.ToDisplayString() == GenerateValidatorAttributeName);
+        var diagnostics = new List<DiagnosticInfo>();
 
-        if (!hasGenerateAttribute)
+        if (typeSymbol.IsGenericType)
         {
-            return null;
+            diagnostics.Add(DiagnosticInfo.Create(
+                ValidatorEmitter.UnsupportedTargetId,
+                $"[GenerateValidator] does not support generic type '{typeSymbol.Name}'; declare a validator manually instead.",
+                typeSymbol.Locations.FirstOrDefault()));
+            return WithOnlyDiagnostics(typeSymbol, diagnostics);
         }
 
-        var properties = new List<PropertyValidationDescriptor>();
+        var properties = new List<PropertyDescriptor>();
         foreach (var member in typeSymbol.GetMembers())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (member is not IPropertySymbol property ||
                 property.IsStatic ||
                 property.DeclaredAccessibility != Accessibility.Public ||
@@ -116,14 +119,25 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var rules = ExtractPropertyRules(property, typeSymbol);
+            var typeName = property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var descriptor = new PropertyShape(
+                property.Name,
+                typeName,
+                typeName.TrimEnd('?'),
+                property.Type.IsReferenceType || property.Type.NullableAnnotation == NullableAnnotation.Annotated,
+                property.Type.SpecialType == SpecialType.System_String,
+                GetEnumerableElementType(property.Type));
+
+            var rules = ExtractPropertyRules(property, typeSymbol, descriptor, diagnostics);
             if (rules.Count > 0)
             {
-                properties.Add(new PropertyValidationDescriptor(
-                    property.Name,
-                    property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    property.Type.IsReferenceType || property.Type.NullableAnnotation == NullableAnnotation.Annotated,
-                    rules));
+                properties.Add(new PropertyDescriptor(
+                    descriptor.Name,
+                    descriptor.TypeName,
+                    descriptor.BareTypeName,
+                    descriptor.IsNullableOrReference,
+                    descriptor.IsString,
+                    new EquatableArray<RuleDescriptor>(rules.ToArray())));
             }
         }
 
@@ -136,33 +150,97 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
             ? "global::" + generatedValidatorName
             : "global::" + namespaceName + "." + generatedValidatorName;
 
-        return new ModelValidationDescriptor(
+        var fullModelTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        return new ModelDescriptor(
             typeSymbol.Name,
             namespaceName,
-            typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            fullModelTypeName,
+            typeSymbol.IsReferenceType,
             generatedValidatorName,
             fullGeneratedValidatorName,
-            properties);
+            CreateHintName(fullModelTypeName),
+            new EquatableArray<PropertyDescriptor>(properties.ToArray()),
+            new EquatableArray<DiagnosticInfo>(diagnostics.ToArray()));
     }
 
-    private static List<RuleDescriptor> ExtractPropertyRules(IPropertySymbol property, INamedTypeSymbol containingType)
+    private static ModelDescriptor WithOnlyDiagnostics(INamedTypeSymbol typeSymbol, List<DiagnosticInfo> diagnostics)
     {
-        var allAttributes = new List<AttributeData>();
-        allAttributes.AddRange(property.GetAttributes());
+        return new ModelDescriptor(
+            typeSymbol.Name,
+            string.Empty,
+            string.Empty,
+            IsReferenceType: true,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            EquatableArray<PropertyDescriptor>.Empty,
+            new EquatableArray<DiagnosticInfo>(diagnostics.ToArray()));
+    }
 
-        // Check primary constructor parameters for record properties
+    private static string CreateHintName(string fullModelTypeName)
+    {
+        var sanitized = fullModelTypeName
+            .Replace("global::", string.Empty)
+            .Replace('.', '_');
+        return sanitized + ".GeneratedValidator.g.cs";
+    }
+
+    private static string? GetEnumerableElementType(ITypeSymbol type)
+    {
+        if (type.SpecialType == SpecialType.System_String)
+        {
+            return null;
+        }
+
+        if (type is IArrayTypeSymbol arrayType)
+        {
+            return arrayType.ElementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
+        }
+
+        if (type is INamedTypeSymbol named &&
+            named.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+        {
+            return named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
+        }
+
+        var enumerableInterface = type.AllInterfaces.FirstOrDefault(static candidate =>
+            candidate.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T);
+        return enumerableInterface?.TypeArguments[0]
+            .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .TrimEnd('?');
+    }
+
+    private sealed record PropertyShape(
+        string Name,
+        string TypeName,
+        string BareTypeName,
+        bool IsNullableOrReference,
+        bool IsString,
+        string? ElementTypeName);
+
+    private static List<RuleDescriptor> ExtractPropertyRules(
+        IPropertySymbol property,
+        INamedTypeSymbol containingType,
+        PropertyShape shape,
+        List<DiagnosticInfo> diagnostics)
+    {
+        var allAttributes = new List<AttributeData>(property.GetAttributes());
+
+        // Records surface primary-constructor attributes on the parameter, not the property.
         foreach (var constructor in containingType.Constructors)
         {
-            var param = constructor.Parameters.FirstOrDefault(p =>
-                string.Equals(p.Name, property.Name, StringComparison.OrdinalIgnoreCase));
+            var parameter = constructor.Parameters.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, property.Name, StringComparison.OrdinalIgnoreCase));
 
-            if (param is not null)
+            if (parameter is not null)
             {
-                foreach (var attr in param.GetAttributes())
+                foreach (var attribute in parameter.GetAttributes())
                 {
-                    if (!allAttributes.Any(a => a.AttributeClass?.ToDisplayString() == attr.AttributeClass?.ToDisplayString()))
+                    if (!allAttributes.Any(existing =>
+                            existing.AttributeClass?.ToDisplayString() == attribute.AttributeClass?.ToDisplayString()))
                     {
-                        allAttributes.Add(attr);
+                        allAttributes.Add(attribute);
                     }
                 }
             }
@@ -171,938 +249,375 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
         var rules = new List<RuleDescriptor>();
         foreach (var attribute in allAttributes)
         {
-            var attrClass = attribute.AttributeClass;
-            if (attrClass is null)
+            var attributeClass = attribute.AttributeClass;
+            if (attributeClass is null)
             {
                 continue;
             }
 
-            var attrFullName = attrClass.ToDisplayString();
+            var attributeFullName = attributeClass.ToDisplayString();
 
-            // Extract common metadata: Code, Message, Severity, Scenarios
             string? code = null;
             string? message = null;
-            int severity = 0; // 0 = Error, 1 = Warning, 2 = Info
-            string[]? scenarios = null;
+            var severity = 0;
+            var scenarios = EquatableArray<string>.Empty;
 
-            foreach (var namedArg in attribute.NamedArguments)
+            foreach (var namedArgument in attribute.NamedArguments)
             {
-                switch (namedArg.Key)
+                switch (namedArgument.Key)
                 {
                     case "Code":
-                        code = namedArg.Value.Value?.ToString();
+                        code = namedArgument.Value.Value?.ToString();
                         break;
                     case "Message":
-                        message = namedArg.Value.Value?.ToString();
+                        message = namedArgument.Value.Value?.ToString();
                         break;
                     case "Severity":
-                        if (namedArg.Value.Value is int sevInt) severity = sevInt;
+                        if (namedArgument.Value.Value is int severityValue)
+                        {
+                            severity = severityValue;
+                        }
+
                         break;
                     case "Scenarios":
-                        if (!namedArg.Value.IsNull && namedArg.Value.Values.Length > 0)
+                        if (!namedArgument.Value.IsNull && namedArgument.Value.Values.Length > 0)
                         {
-                            scenarios = namedArg.Value.Values
-                                .Select(v => v.Value?.ToString())
-                                .Where(v => !string.IsNullOrEmpty(v))
-                                .ToArray()!;
+                            var values = namedArgument.Value.Values
+                                .Select(static value => value.Value?.ToString())
+                                .Where(static value => !string.IsNullOrEmpty(value))
+                                .Select(static value => value!)
+                                .ToArray();
+                            scenarios = new EquatableArray<string>(values);
                         }
+
                         break;
                 }
             }
 
-            // Match eQuantic rules & DataAnnotations
-            if (attrFullName == "eQuantic.Validation.Attributes.RequiredAttribute" ||
-                attrFullName == "System.ComponentModel.DataAnnotations.RequiredAttribute")
+            var rule = CreateRule(attribute, attributeFullName, code, message, severity, scenarios, shape, containingType, diagnostics);
+            if (rule is not null)
             {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.Required,
-                    code ?? "required",
-                    message ?? "{Property} is required.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.NotEmptyAttribute")
-            {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.NotEmpty,
-                    code ?? "not_empty",
-                    message ?? "{Property} must not be empty.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.NotWhiteSpaceAttribute")
-            {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.NotWhiteSpace,
-                    code ?? "not_whitespace",
-                    message ?? "{Property} must not be blank.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.EmailAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.EmailAddressAttribute")
-            {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.Email,
-                    code ?? "email",
-                    message ?? "{Property} must be a valid email address.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.MinLengthAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.MinLengthAttribute")
-            {
-                var length = attribute.ConstructorArguments.Length > 0 && attribute.ConstructorArguments[0].Value is int len ? len : 0;
-                rules.Add(new RuleDescriptor(
-                    RuleKind.MinLength,
-                    code ?? "minimum_length",
-                    message ?? "{Property} must contain at least {MinimumLength} characters.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["MinimumLength"] = length }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.MaxLengthAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.MaxLengthAttribute")
-            {
-                var length = attribute.ConstructorArguments.Length > 0 && attribute.ConstructorArguments[0].Value is int len ? len : 0;
-                rules.Add(new RuleDescriptor(
-                    RuleKind.MaxLength,
-                    code ?? "maximum_length",
-                    message ?? "{Property} must contain no more than {MaximumLength} characters.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["MaximumLength"] = length }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.LengthAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.StringLengthAttribute")
-            {
-                int min = 0;
-                int max = 0;
-                if (attribute.ConstructorArguments.Length >= 2)
-                {
-                    min = attribute.ConstructorArguments[0].Value is int m ? m : 0;
-                    max = attribute.ConstructorArguments[1].Value is int mx ? mx : 0;
-                }
-                else if (attribute.ConstructorArguments.Length == 1)
-                {
-                    max = attribute.ConstructorArguments[0].Value is int mx ? mx : 0;
-                    foreach (var namedArg in attribute.NamedArguments)
-                    {
-                        if (namedArg.Key == "MinimumLength" && namedArg.Value.Value is int mn) min = mn;
-                    }
-                }
-
-                rules.Add(new RuleDescriptor(
-                    RuleKind.Length,
-                    code ?? "range",
-                    message ?? "{Property} must contain between {MinimumLength} and {MaximumLength} characters.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["MinimumLength"] = min, ["MaximumLength"] = max }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.RangeAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.RangeAttribute")
-            {
-                object? min = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value : null;
-                object? max = attribute.ConstructorArguments.Length > 1 ? attribute.ConstructorArguments[1].Value : null;
-                rules.Add(new RuleDescriptor(
-                    RuleKind.Range,
-                    code ?? "range",
-                    message ?? "{Property} must be between {Minimum} and {Maximum}.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["Minimum"] = min, ["Maximum"] = max }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.PatternAttribute" ||
-                     attrFullName == "System.ComponentModel.DataAnnotations.RegularExpressionAttribute")
-            {
-                var pattern = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value?.ToString() ?? "" : "";
-                rules.Add(new RuleDescriptor(
-                    RuleKind.Pattern,
-                    code ?? "pattern",
-                    message ?? "{Property} has an invalid format.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["Pattern"] = pattern }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.GreaterThanAttribute")
-            {
-                object? val = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value : null;
-                rules.Add(new RuleDescriptor(
-                    RuleKind.GreaterThan,
-                    code ?? "range",
-                    message ?? "{Property} must be greater than {Minimum}.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["Minimum"] = val }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.LessThanAttribute")
-            {
-                object? val = attribute.ConstructorArguments.Length > 0 ? attribute.ConstructorArguments[0].Value : null;
-                rules.Add(new RuleDescriptor(
-                    RuleKind.LessThan,
-                    code ?? "range",
-                    message ?? "{Property} must be less than {Maximum}.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["Maximum"] = val }.ToImmutableDictionary()));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.ValidateNestedAttribute")
-            {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.ValidateNested,
-                    code ?? "nested",
-                    message ?? "{Property} is invalid.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.ValidateEachAttribute")
-            {
-                rules.Add(new RuleDescriptor(
-                    RuleKind.ValidateEach,
-                    code ?? "collection",
-                    message ?? "{Property} is invalid.",
-                    severity,
-                    scenarios,
-                    ImmutableDictionary<string, object?>.Empty));
-            }
-            else if (attrFullName == "eQuantic.Validation.Attributes.CustomRuleAttribute")
-            {
-                string methodName = "";
-                string? declaringType = null;
-                if (attribute.ConstructorArguments.Length == 1)
-                {
-                    methodName = attribute.ConstructorArguments[0].Value?.ToString() ?? "";
-                }
-                else if (attribute.ConstructorArguments.Length == 2)
-                {
-                    if (attribute.ConstructorArguments[0].Value is ITypeSymbol typeSym)
-                    {
-                        declaringType = typeSym.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                    }
-                    methodName = attribute.ConstructorArguments[1].Value?.ToString() ?? "";
-                }
-
-                rules.Add(new RuleDescriptor(
-                    RuleKind.CustomRule,
-                    code ?? "predicate",
-                    message ?? "{Property} is invalid.",
-                    severity,
-                    scenarios,
-                    new Dictionary<string, object?> { ["MethodName"] = methodName, ["DeclaringType"] = declaringType }.ToImmutableDictionary()));
+                rules.Add(rule);
             }
         }
 
         return rules;
     }
 
-    private static void GenerateModelValidator(SourceProductionContext context, ModelValidationDescriptor model)
+    private static RuleDescriptor? CreateRule(
+        AttributeData attribute,
+        string attributeFullName,
+        string? code,
+        string? message,
+        int severity,
+        EquatableArray<string> scenarios,
+        PropertyShape shape,
+        INamedTypeSymbol containingType,
+        List<DiagnosticInfo> diagnostics)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated />");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine();
-
-        if (!string.IsNullOrEmpty(model.Namespace))
+        switch (attributeFullName)
         {
-            sb.Append("namespace ").AppendLine(model.Namespace);
-            sb.AppendLine("{");
-        }
+            case "eQuantic.Validation.Attributes.RequiredAttribute":
+            case "System.ComponentModel.DataAnnotations.RequiredAttribute":
+                return new RuleDescriptor(
+                    RuleKind.Required, code ?? "required", message ?? "{Property} is required.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty);
 
-        var indent = string.IsNullOrEmpty(model.Namespace) ? "" : "    ";
+            case "eQuantic.Validation.Attributes.NotEmptyAttribute":
+                return new RuleDescriptor(
+                    RuleKind.NotEmpty, code ?? "not_empty", message ?? "{Property} must not be empty.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty);
 
-        sb.Append(indent).Append("/// <summary>Generated zero-allocation validator for <see cref=\"").Append(model.ModelName).AppendLine("\"/>.</summary>");
-        sb.Append(indent).Append("[global::System.CodeDom.Compiler.GeneratedCode(\"eQuantic.Validation.Generator\", \"1.0.0\")]").AppendLine();
-        sb.Append(indent).Append("public sealed class ").Append(model.GeneratedValidatorName)
-            .Append(" : global::eQuantic.Validation.IValidator<").Append(model.FullModelTypeName).AppendLine(">");
-        sb.Append(indent).AppendLine("{");
-
-        var innerIndent = indent + "    ";
-
-        // ValidatedType property
-        sb.Append(innerIndent).AppendLine("/// <inheritdoc />");
-        sb.Append(innerIndent).Append("public global::System.Type ValidatedType => typeof(").Append(model.FullModelTypeName).AppendLine(");");
-        sb.AppendLine();
-
-        // Validate method (Sync)
-        sb.Append(innerIndent).AppendLine("/// <inheritdoc />");
-        sb.Append(innerIndent).Append("public global::eQuantic.Validation.ValidationResult Validate(")
-            .Append(model.FullModelTypeName).AppendLine(" instance, global::eQuantic.Validation.ValidationContext? context = null)");
-        sb.Append(innerIndent).AppendLine("{");
-        sb.Append(innerIndent).AppendLine("    if (instance is null)");
-        sb.Append(innerIndent).AppendLine("    {");
-        sb.Append(innerIndent).AppendLine("        return global::eQuantic.Validation.ValidationResult.Failure(");
-        sb.Append(innerIndent).AppendLine("            new global::eQuantic.Validation.ValidationFailure(string.Empty, global::eQuantic.Validation.ValidationCodes.Required, \"The instance is required.\"));");
-        sb.Append(innerIndent).AppendLine("    }");
-        sb.AppendLine();
-        sb.Append(innerIndent).AppendLine("    var effectiveContext = context ?? global::eQuantic.Validation.ValidationContext.Default;");
-        sb.Append(innerIndent).AppendLine("    var failures = new global::System.Collections.Generic.List<global::eQuantic.Validation.ValidationFailure>();");
-        sb.AppendLine();
-
-        foreach (var prop in model.Properties)
-        {
-            GeneratePropertyValidationSync(sb, innerIndent + "    ", prop, model);
-        }
-
-        sb.Append(innerIndent).AppendLine("    return failures.Count == 0 ? global::eQuantic.Validation.ValidationResult.Success : new global::eQuantic.Validation.ValidationResult(failures);");
-        sb.Append(innerIndent).AppendLine("}");
-        sb.AppendLine();
-
-        // ValidateAsync method (Async)
-        sb.Append(innerIndent).AppendLine("/// <inheritdoc />");
-        sb.Append(innerIndent).Append("public async global::System.Threading.Tasks.Task<global::eQuantic.Validation.ValidationResult> ValidateAsync(")
-            .Append(model.FullModelTypeName).AppendLine(" instance, global::eQuantic.Validation.ValidationContext? context = null, global::System.Threading.CancellationToken cancellationToken = default)");
-        sb.Append(innerIndent).AppendLine("{");
-        sb.Append(innerIndent).AppendLine("    if (instance is null)");
-        sb.Append(innerIndent).AppendLine("    {");
-        sb.Append(innerIndent).AppendLine("        return global::eQuantic.Validation.ValidationResult.Failure(");
-        sb.Append(innerIndent).AppendLine("            new global::eQuantic.Validation.ValidationFailure(string.Empty, global::eQuantic.Validation.ValidationCodes.Required, \"The instance is required.\"));");
-        sb.Append(innerIndent).AppendLine("    }");
-        sb.AppendLine();
-        sb.Append(innerIndent).AppendLine("    cancellationToken.ThrowIfCancellationRequested();");
-        sb.Append(innerIndent).AppendLine("    var effectiveContext = context ?? global::eQuantic.Validation.ValidationContext.Default;");
-        sb.Append(innerIndent).AppendLine("    var failures = new global::System.Collections.Generic.List<global::eQuantic.Validation.ValidationFailure>();");
-        sb.AppendLine();
-
-        foreach (var prop in model.Properties)
-        {
-            GeneratePropertyValidationAsync(sb, innerIndent + "    ", prop, model);
-        }
-
-        sb.Append(innerIndent).AppendLine("    return failures.Count == 0 ? global::eQuantic.Validation.ValidationResult.Success : new global::eQuantic.Validation.ValidationResult(failures);");
-        sb.Append(innerIndent).AppendLine("}");
-        sb.AppendLine();
-
-        // Non-generic IValidator interface implementation
-        sb.Append(innerIndent).AppendLine("global::eQuantic.Validation.ValidationResult global::eQuantic.Validation.IValidator.Validate(object instance, global::eQuantic.Validation.ValidationContext? context) =>");
-        sb.Append(innerIndent).Append("    instance is ").Append(model.FullModelTypeName).AppendLine(" typed ? Validate(typed, context) : throw new global::System.ArgumentException($\"Expected an instance of '{typeof(").Append(model.FullModelTypeName).AppendLine(").FullName}'.\", nameof(instance));");
-        sb.AppendLine();
-
-        sb.Append(innerIndent).AppendLine("global::System.Threading.Tasks.Task<global::eQuantic.Validation.ValidationResult> global::eQuantic.Validation.IValidator.ValidateAsync(object instance, global::eQuantic.Validation.ValidationContext? context, global::System.Threading.CancellationToken cancellationToken) =>");
-        sb.Append(innerIndent).Append("    instance is ").Append(model.FullModelTypeName).AppendLine(" typed ? ValidateAsync(typed, context, cancellationToken) : throw new global::System.ArgumentException($\"Expected an instance of '{typeof(").Append(model.FullModelTypeName).AppendLine(").FullName}'.\", nameof(instance));");
-        sb.AppendLine();
-
-        sb.Append(innerIndent).AppendLine("private static global::eQuantic.Validation.ValidationFailure CreateFailure(global::eQuantic.Validation.ValidationContext context, string path, string code, string defaultTemplate, global::eQuantic.Validation.ValidationSeverity severity)");
-        sb.Append(innerIndent).AppendLine("{");
-        sb.Append(innerIndent).AppendLine("    var message = context.MessageProvider?.Resolve(new global::eQuantic.Validation.ValidationMessageDescriptor(path, path, code, defaultTemplate, new global::System.Collections.Generic.Dictionary<string, object?>())) ?? defaultTemplate;");
-        sb.Append(innerIndent).AppendLine("    return new global::eQuantic.Validation.ValidationFailure(path, code, message, severity);");
-        sb.Append(innerIndent).AppendLine("}");
-
-        sb.Append(indent).AppendLine("}");
-
-        if (!string.IsNullOrEmpty(model.Namespace))
-        {
-            sb.AppendLine("}");
-        }
-
-        context.AddSource($"{model.ModelName}.GeneratedValidator.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
-    }
-
-    private static void GeneratePropertyValidationSync(StringBuilder sb, string indent, PropertyValidationDescriptor prop, ModelValidationDescriptor model)
-    {
-        sb.Append(indent).Append("// ---- Property: ").Append(prop.PropertyName).AppendLine(" ----");
-        sb.Append(indent).Append("if (effectiveContext.IncludesPath(\"").Append(prop.PropertyName).AppendLine("\"))");
-        sb.Append(indent).AppendLine("{");
-
-        var propIndent = indent + "    ";
-        sb.Append(propIndent).Append("var val = instance.").Append(prop.PropertyName).AppendLine(";");
-
-        foreach (var rule in prop.Rules)
-        {
-            GenerateRuleCheckSync(sb, propIndent, prop, rule, model);
-        }
-
-        sb.Append(indent).AppendLine("}");
-        sb.AppendLine();
-    }
-
-    private static void GeneratePropertyValidationAsync(StringBuilder sb, string indent, PropertyValidationDescriptor prop, ModelValidationDescriptor model)
-    {
-        sb.Append(indent).Append("// ---- Property: ").Append(prop.PropertyName).AppendLine(" ----");
-        sb.Append(indent).Append("if (effectiveContext.IncludesPath(\"").Append(prop.PropertyName).AppendLine("\"))");
-        sb.Append(indent).AppendLine("{");
-
-        var propIndent = indent + "    ";
-        sb.Append(propIndent).Append("var val = instance.").Append(prop.PropertyName).AppendLine(";");
-
-        foreach (var rule in prop.Rules)
-        {
-            GenerateRuleCheckAsync(sb, propIndent, prop, rule, model);
-        }
-
-        sb.Append(indent).AppendLine("}");
-        sb.AppendLine();
-    }
-
-    private static void GenerateRuleCheckSync(StringBuilder sb, string indent, PropertyValidationDescriptor prop, RuleDescriptor rule, ModelValidationDescriptor model)
-    {
-        var scenarioCondition = BuildScenarioCondition(rule.Scenarios);
-        if (!string.IsNullOrEmpty(scenarioCondition))
-        {
-            sb.Append(indent).Append("if (").Append(scenarioCondition).AppendLine(")");
-            sb.Append(indent).AppendLine("{");
-            indent += "    ";
-        }
-
-        var propName = prop.PropertyName;
-        var code = EscapeString(rule.Code);
-        var msg = EscapeString(rule.Message.Replace("{Property}", propName));
-        var sev = rule.Severity switch { 1 => "global::eQuantic.Validation.ValidationSeverity.Warning", 2 => "global::eQuantic.Validation.ValidationSeverity.Info", _ => "global::eQuantic.Validation.ValidationSeverity.Error" };
-
-        switch (rule.Kind)
-        {
-            case RuleKind.Required:
-                if (prop.TypeName.TrimEnd('?') == "string")
+            case "eQuantic.Validation.Attributes.NotWhiteSpaceAttribute":
+                if (!RequireString(attribute, shape, "NotWhiteSpace", diagnostics))
                 {
-                    sb.Append(indent).AppendLine("if (string.IsNullOrWhiteSpace(val))");
+                    return null;
                 }
-                else if (prop.IsNullableOrReference)
-                {
-                    sb.Append(indent).AppendLine("if (val is null)");
-                }
-                else
-                {
-                    sb.Append(indent).AppendLine("if (val == default)");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
-                break;
 
-            case RuleKind.NotEmpty:
-                if (prop.TypeName.TrimEnd('?') == "string")
-                {
-                    sb.Append(indent).AppendLine("if (string.IsNullOrEmpty(val))");
-                }
-                else if (prop.IsNullableOrReference)
-                {
-                    sb.Append(indent).AppendLine("if (val is null || (val is global::System.Collections.IEnumerable enumerable && !enumerable.GetEnumerator().MoveNext()))");
-                }
-                else
-                {
-                    sb.Append(indent).AppendLine("if (global::System.Collections.Generic.EqualityComparer<").Append(prop.TypeName).AppendLine(">.Default.Equals(val, default!))");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
-                break;
+                return new RuleDescriptor(
+                    RuleKind.NotWhiteSpace, code ?? "not_whitespace", message ?? "{Property} must not be blank.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty);
 
-            case RuleKind.NotWhiteSpace:
-                sb.Append(indent).AppendLine("if (val is null || string.IsNullOrWhiteSpace(val as string))");
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.Email:
-                if (prop.TypeName.TrimEnd('?') == "string")
+            case "eQuantic.Validation.Attributes.EmailAttribute":
+            case "System.ComponentModel.DataAnnotations.EmailAddressAttribute":
+                if (!RequireString(attribute, shape, "Email", diagnostics))
                 {
-                    sb.Append(indent).AppendLine("if (!string.IsNullOrWhiteSpace(val) && !global::System.Text.RegularExpressions.Regex.IsMatch(val, @\"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$\"))");
+                    return null;
                 }
-                else
+
+                return new RuleDescriptor(
+                    RuleKind.Email, code ?? "email", message ?? "{Property} must be a valid email address.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty);
+
+            case "eQuantic.Validation.Attributes.MinLengthAttribute":
+            case "System.ComponentModel.DataAnnotations.MinLengthAttribute":
+            {
+                var length = GetConstructorInt(attribute, 0);
+                return new RuleDescriptor(
+                    RuleKind.MinLength, code ?? "minimum_length",
+                    message ?? "{Property} must contain at least {MinimumLength} characters.",
+                    severity, scenarios,
+                    Arguments(new RuleArgument("MinimumLength", length.ToString(CultureInfo.InvariantCulture))));
+            }
+
+            case "eQuantic.Validation.Attributes.MaxLengthAttribute":
+            case "System.ComponentModel.DataAnnotations.MaxLengthAttribute":
+            {
+                var length = GetConstructorInt(attribute, 0);
+                return new RuleDescriptor(
+                    RuleKind.MaxLength, code ?? "maximum_length",
+                    message ?? "{Property} must contain no more than {MaximumLength} characters.",
+                    severity, scenarios,
+                    Arguments(new RuleArgument("MaximumLength", length.ToString(CultureInfo.InvariantCulture))));
+            }
+
+            case "eQuantic.Validation.Attributes.LengthAttribute":
+            case "System.ComponentModel.DataAnnotations.StringLengthAttribute":
+            {
+                var minimum = 0;
+                var maximum = 0;
+                if (attribute.ConstructorArguments.Length >= 2)
                 {
-                    sb.Append(indent).AppendLine("if (val is string emailText && (string.IsNullOrWhiteSpace(emailText) || !global::System.Text.RegularExpressions.Regex.IsMatch(emailText, @\"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$\")))");
+                    minimum = GetConstructorInt(attribute, 0);
+                    maximum = GetConstructorInt(attribute, 1);
                 }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.MinLength:
-                var minLen = rule.Arguments.TryGetValue("MinimumLength", out var ml) ? ml : 0;
-                var mlMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{MinimumLength}", minLen?.ToString() ?? "0"));
-                if (prop.TypeName.TrimEnd('?') == "string")
+                else if (attribute.ConstructorArguments.Length == 1)
                 {
-                    sb.Append(indent).Append("if (val is not null && val.Length < ").Append(minLen).AppendLine(")");
-                }
-                else
-                {
-                    sb.Append(indent).Append("if (val is global::System.Collections.ICollection colMin && colMin.Count < ").Append(minLen).AppendLine(")");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(mlMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.MaxLength:
-                var maxLen = rule.Arguments.TryGetValue("MaximumLength", out var mxl) ? mxl : 0;
-                var mxlMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{MaximumLength}", maxLen?.ToString() ?? "0"));
-                if (prop.TypeName.TrimEnd('?') == "string")
-                {
-                    sb.Append(indent).Append("if (val is not null && val.Length > ").Append(maxLen).AppendLine(")");
-                }
-                else
-                {
-                    sb.Append(indent).Append("if (val is global::System.Collections.ICollection colMax && colMax.Count > ").Append(maxLen).AppendLine(")");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(mxlMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.Length:
-                var lenMin = rule.Arguments.TryGetValue("MinimumLength", out var lmn) ? lmn : 0;
-                var lenMax = rule.Arguments.TryGetValue("MaximumLength", out var lmx) ? lmx : 0;
-                var lenMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{MinimumLength}", lenMin?.ToString() ?? "0").Replace("{MaximumLength}", lenMax?.ToString() ?? "0"));
-                if (prop.TypeName.TrimEnd('?') == "string")
-                {
-                    sb.Append(indent).Append("if (val is not null && (val.Length < ").Append(lenMin).Append(" || val.Length > ").Append(lenMax).AppendLine("))");
-                }
-                else
-                {
-                    sb.Append(indent).Append("if (val is global::System.Collections.ICollection colLen && (colLen.Count < ").Append(lenMin).Append(" || colLen.Count > ").Append(lenMax).AppendLine("))");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(lenMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.Range:
-                var rMin = rule.Arguments.TryGetValue("Minimum", out var rm) ? rm : 0;
-                var rMax = rule.Arguments.TryGetValue("Maximum", out var rmx) ? rmx : 0;
-                var rngMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{Minimum}", rMin?.ToString() ?? "0").Replace("{Maximum}", rMax?.ToString() ?? "0"));
-                sb.Append(indent).Append("if (val < ").Append(rMin).Append(" || val > ").Append(rMax).AppendLine(")");
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(rngMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.Pattern:
-                var pattern = rule.Arguments.TryGetValue("Pattern", out var pat) ? pat?.ToString() ?? "" : "";
-                if (prop.TypeName.TrimEnd('?') == "string")
-                {
-                    sb.Append(indent).Append("if (val is not null && !global::System.Text.RegularExpressions.Regex.IsMatch(val, @\"").Append(pattern.Replace("\"", "\"\"")).AppendLine("\"))");
-                }
-                else
-                {
-                    sb.Append(indent).Append("if (val is string strPat && !global::System.Text.RegularExpressions.Regex.IsMatch(strPat, @\"").Append(pattern.Replace("\"", "\"\"")).AppendLine("\"))");
-                }
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.GreaterThan:
-                var gtVal = rule.Arguments.TryGetValue("Minimum", out var gtv) ? gtv : 0;
-                var gtMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{Minimum}", gtVal?.ToString() ?? "0"));
-                sb.Append(indent).Append("if (val <= ").Append(gtVal).AppendLine(")");
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(gtMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.LessThan:
-                var ltVal = rule.Arguments.TryGetValue("Maximum", out var ltv) ? ltv : 0;
-                var ltMsg = EscapeString(rule.Message.Replace("{Property}", propName).Replace("{Maximum}", ltVal?.ToString() ?? "0"));
-                sb.Append(indent).Append("if (val >= ").Append(ltVal).AppendLine(")");
-                sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(ltMsg).Append("\", ").Append(sev).AppendLine("));");
-                break;
-
-            case RuleKind.ValidateNested:
-                sb.Append(indent).AppendLine("if (val is not null)");
-                sb.Append(indent).AppendLine("{");
-                sb.Append(indent).Append("    var childValidator = effectiveContext.GetService<global::eQuantic.Validation.IValidator<").Append(prop.TypeName).AppendLine(">>();");
-                sb.Append(indent).AppendLine("    if (childValidator is not null)");
-                sb.Append(indent).AppendLine("    {");
-                sb.Append(indent).Append("        var childResult = childValidator.Validate(val, effectiveContext.CreateChildScope(\"").Append(propName).AppendLine("\"));");
-                sb.Append(indent).AppendLine("        foreach (var failure in childResult.Failures)");
-                sb.Append(indent).AppendLine("        {");
-                sb.Append(indent).Append("            failures.Add(failure.WithPathPrefix(\"").Append(propName).AppendLine("\"));");
-                sb.Append(indent).AppendLine("        }");
-                sb.Append(indent).AppendLine("    }");
-                sb.Append(indent).AppendLine("}");
-                break;
-
-            case RuleKind.ValidateEach:
-                sb.Append(indent).AppendLine("if (val is global::System.Collections.IEnumerable elements)");
-                sb.Append(indent).AppendLine("{");
-                sb.Append(indent).AppendLine("    var index = 0;");
-                sb.Append(indent).AppendLine("    foreach (var element in elements)");
-                sb.Append(indent).AppendLine("    {");
-                sb.Append(indent).Append("        var itemPath = $\"").Append(propName).AppendLine("[{index}]\";");
-                sb.Append(indent).AppendLine("        if (element is not null && effectiveContext.IncludesPath(itemPath))");
-                sb.Append(indent).AppendLine("        {");
-                sb.Append(indent).AppendLine("            var itemValidator = effectiveContext.GetService(typeof(global::eQuantic.Validation.IValidator<>).MakeGenericType(element.GetType())) as global::eQuantic.Validation.IValidator;");
-                sb.Append(indent).AppendLine("            if (itemValidator is not null)");
-                sb.Append(indent).AppendLine("            {");
-                sb.Append(indent).AppendLine("                var itemResult = itemValidator.Validate(element, effectiveContext.CreateChildScope(itemPath));");
-                sb.Append(indent).AppendLine("                foreach (var failure in itemResult.Failures)");
-                sb.Append(indent).AppendLine("                {");
-                sb.Append(indent).AppendLine("                    failures.Add(failure.WithPathPrefix(itemPath));");
-                sb.Append(indent).AppendLine("                }");
-                sb.Append(indent).AppendLine("            }");
-                sb.Append(indent).AppendLine("        }");
-                sb.Append(indent).AppendLine("        index++;");
-                sb.Append(indent).AppendLine("    }");
-                sb.Append(indent).AppendLine("}");
-                break;
-
-            case RuleKind.CustomRule:
-                var method = rule.Arguments.TryGetValue("MethodName", out var mn) ? mn?.ToString() : "";
-                var declType = rule.Arguments.TryGetValue("DeclaringType", out var dt) ? dt?.ToString() : null;
-                if (!string.IsNullOrEmpty(method))
-                {
-                    if (string.IsNullOrEmpty(declType))
+                    maximum = GetConstructorInt(attribute, 0);
+                    foreach (var namedArgument in attribute.NamedArguments)
                     {
-                        sb.Append(indent).Append("if (!instance.").Append(method).AppendLine("(val))");
+                        if (namedArgument.Key == "MinimumLength" && namedArgument.Value.Value is int minimumValue)
+                        {
+                            minimum = minimumValue;
+                        }
                     }
-                    else
-                    {
-                        sb.Append(indent).Append("if (!").Append(declType).Append(".").Append(method).AppendLine("(instance, val))");
-                    }
-                    sb.Append(indent).Append("    failures.Add(CreateFailure(effectiveContext, \"").Append(propName).Append("\", \"").Append(code).Append("\", \"").Append(msg).Append("\", ").Append(sev).AppendLine("));");
                 }
-                break;
-        }
 
-        if (!string.IsNullOrEmpty(scenarioCondition))
-        {
-            sb.Append(indent.Substring(4)).AppendLine("}");
-        }
-    }
+                return new RuleDescriptor(
+                    RuleKind.Length, code ?? "range",
+                    message ?? "{Property} must contain between {MinimumLength} and {MaximumLength} characters.",
+                    severity, scenarios,
+                    Arguments(
+                        new RuleArgument("MinimumLength", minimum.ToString(CultureInfo.InvariantCulture)),
+                        new RuleArgument("MaximumLength", maximum.ToString(CultureInfo.InvariantCulture))));
+            }
 
-    private static void GenerateRuleCheckAsync(StringBuilder sb, string indent, PropertyValidationDescriptor prop, RuleDescriptor rule, ModelValidationDescriptor model)
-    {
-        var scenarioCondition = BuildScenarioCondition(rule.Scenarios);
-        if (!string.IsNullOrEmpty(scenarioCondition))
-        {
-            sb.Append(indent).Append("if (").Append(scenarioCondition).AppendLine(")");
-            sb.Append(indent).AppendLine("{");
-            indent += "    ";
-        }
+            case "eQuantic.Validation.Attributes.RangeAttribute":
+            case "System.ComponentModel.DataAnnotations.RangeAttribute":
+            {
+                if (!RequireNonString(attribute, shape, "Range", diagnostics))
+                {
+                    return null;
+                }
 
-        var propName = prop.PropertyName;
-        var code = EscapeString(rule.Code);
-        var msg = EscapeString(rule.Message.Replace("{Property}", propName));
-        var sev = rule.Severity switch { 1 => "global::eQuantic.Validation.ValidationSeverity.Warning", 2 => "global::eQuantic.Validation.ValidationSeverity.Info", _ => "global::eQuantic.Validation.ValidationSeverity.Error" };
+                var minimum = RenderNumericLiteral(GetConstructorValue(attribute, 0), shape.BareTypeName);
+                var maximum = RenderNumericLiteral(GetConstructorValue(attribute, 1), shape.BareTypeName);
+                return new RuleDescriptor(
+                    RuleKind.Range, code ?? "range",
+                    message ?? "{Property} must be between {Minimum} and {Maximum}.",
+                    severity, scenarios,
+                    Arguments(new RuleArgument("Minimum", minimum), new RuleArgument("Maximum", maximum)));
+            }
 
-        switch (rule.Kind)
-        {
-            case RuleKind.ValidateNested:
-                sb.Append(indent).AppendLine("if (val is not null)");
-                sb.Append(indent).AppendLine("{");
-                sb.Append(indent).Append("    var childValidator = effectiveContext.GetService<global::eQuantic.Validation.IValidator<").Append(prop.TypeName).AppendLine(">>();");
-                sb.Append(indent).AppendLine("    if (childValidator is not null)");
-                sb.Append(indent).AppendLine("    {");
-                sb.Append(indent).Append("        var childResult = await childValidator.ValidateAsync(val, effectiveContext.CreateChildScope(\"").Append(propName).AppendLine("\"), cancellationToken).ConfigureAwait(false);");
-                sb.Append(indent).AppendLine("        foreach (var failure in childResult.Failures)");
-                sb.Append(indent).AppendLine("        {");
-                sb.Append(indent).Append("            failures.Add(failure.WithPathPrefix(\"").Append(propName).AppendLine("\"));");
-                sb.Append(indent).AppendLine("        }");
-                sb.Append(indent).AppendLine("    }");
-                sb.Append(indent).AppendLine("}");
-                break;
+            case "eQuantic.Validation.Attributes.GreaterThanAttribute":
+            {
+                if (!RequireNonString(attribute, shape, "GreaterThan", diagnostics))
+                {
+                    return null;
+                }
 
-            case RuleKind.ValidateEach:
-                sb.Append(indent).AppendLine("if (val is global::System.Collections.IEnumerable elements)");
-                sb.Append(indent).AppendLine("{");
-                sb.Append(indent).AppendLine("    var index = 0;");
-                sb.Append(indent).AppendLine("    foreach (var element in elements)");
-                sb.Append(indent).AppendLine("    {");
-                sb.Append(indent).AppendLine("        cancellationToken.ThrowIfCancellationRequested();");
-                sb.Append(indent).Append("        var itemPath = $\"").Append(propName).AppendLine("[{index}]\";");
-                sb.Append(indent).AppendLine("        if (element is not null && effectiveContext.IncludesPath(itemPath))");
-                sb.Append(indent).AppendLine("        {");
-                sb.Append(indent).AppendLine("            var itemValidator = effectiveContext.GetService(typeof(global::eQuantic.Validation.IValidator<>).MakeGenericType(element.GetType())) as global::eQuantic.Validation.IValidator;");
-                sb.Append(indent).AppendLine("            if (itemValidator is not null)");
-                sb.Append(indent).AppendLine("            {");
-                sb.Append(indent).AppendLine("                var itemResult = await itemValidator.ValidateAsync(element, effectiveContext.CreateChildScope(itemPath), cancellationToken).ConfigureAwait(false);");
-                sb.Append(indent).AppendLine("                foreach (var failure in itemResult.Failures)");
-                sb.Append(indent).AppendLine("                {");
-                sb.Append(indent).AppendLine("                    failures.Add(failure.WithPathPrefix(itemPath));");
-                sb.Append(indent).AppendLine("                }");
-                sb.Append(indent).AppendLine("            }");
-                sb.Append(indent).AppendLine("        }");
-                sb.Append(indent).AppendLine("        index++;");
-                sb.Append(indent).AppendLine("    }");
-                sb.Append(indent).AppendLine("}");
-                break;
+                var minimum = RenderNumericLiteral(GetConstructorValue(attribute, 0), shape.BareTypeName);
+                return new RuleDescriptor(
+                    RuleKind.GreaterThan, code ?? "range",
+                    message ?? "{Property} must be greater than {Minimum}.",
+                    severity, scenarios,
+                    Arguments(new RuleArgument("Minimum", minimum)));
+            }
+
+            case "eQuantic.Validation.Attributes.LessThanAttribute":
+            {
+                if (!RequireNonString(attribute, shape, "LessThan", diagnostics))
+                {
+                    return null;
+                }
+
+                var maximum = RenderNumericLiteral(GetConstructorValue(attribute, 0), shape.BareTypeName);
+                return new RuleDescriptor(
+                    RuleKind.LessThan, code ?? "range",
+                    message ?? "{Property} must be less than {Maximum}.",
+                    severity, scenarios,
+                    Arguments(new RuleArgument("Maximum", maximum)));
+            }
+
+            case "eQuantic.Validation.Attributes.PatternAttribute":
+            case "System.ComponentModel.DataAnnotations.RegularExpressionAttribute":
+            {
+                if (!RequireString(attribute, shape, "Pattern", diagnostics))
+                {
+                    return null;
+                }
+
+                var pattern = GetConstructorValue(attribute, 0)?.ToString() ?? string.Empty;
+                return new RuleDescriptor(
+                    RuleKind.Pattern, code ?? "pattern", message ?? "{Property} has an invalid format.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty,
+                    Pattern: pattern);
+            }
+
+            case "eQuantic.Validation.Attributes.ValidateNestedAttribute":
+                return new RuleDescriptor(
+                    RuleKind.ValidateNested, code ?? "nested", message ?? "{Property} is invalid.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty);
+
+            case "eQuantic.Validation.Attributes.ValidateEachAttribute":
+            {
+                if (shape.ElementTypeName is null)
+                {
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        ValidatorEmitter.ElementTypeUnresolvedId,
+                        $"[ValidateEach] on '{shape.Name}' requires a property implementing IEnumerable<T>; the element type could not be determined.",
+                        GetAttributeLocation(attribute)));
+                    return null;
+                }
+
+                return new RuleDescriptor(
+                    RuleKind.ValidateEach, code ?? "collection", message ?? "{Property} is invalid.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty,
+                    ElementTypeName: shape.ElementTypeName);
+            }
+
+            case "eQuantic.Validation.Attributes.CustomRuleAttribute":
+            {
+                string methodName;
+                string? declaringType = null;
+                ITypeSymbol? declaringTypeSymbol = null;
+
+                if (attribute.ConstructorArguments.Length == 2)
+                {
+                    declaringTypeSymbol = attribute.ConstructorArguments[0].Value as ITypeSymbol;
+                    declaringType = declaringTypeSymbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    methodName = attribute.ConstructorArguments[1].Value?.ToString() ?? string.Empty;
+                }
+                else
+                {
+                    methodName = GetConstructorValue(attribute, 0)?.ToString() ?? string.Empty;
+                }
+
+                if (string.IsNullOrEmpty(methodName))
+                {
+                    return null;
+                }
+
+                var methodHost = declaringTypeSymbol ?? containingType;
+                var expectStatic = declaringTypeSymbol is not null;
+                var found = methodHost.GetMembers(methodName)
+                    .OfType<IMethodSymbol>()
+                    .Any(candidate =>
+                        candidate.IsStatic == expectStatic &&
+                        candidate.ReturnType.SpecialType == SpecialType.System_Boolean);
+
+                if (!found)
+                {
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        ValidatorEmitter.CustomRuleMethodMissingId,
+                        $"[CustomRule] method '{methodName}' returning bool was not found on '{methodHost.Name}' (expected {(expectStatic ? "a static" : "an instance")} method).",
+                        GetAttributeLocation(attribute)));
+                    return null;
+                }
+
+                return new RuleDescriptor(
+                    RuleKind.CustomRule, code ?? "predicate", message ?? "{Property} is invalid.",
+                    severity, scenarios, EquatableArray<RuleArgument>.Empty,
+                    CustomMethodName: methodName,
+                    CustomDeclaringType: declaringType);
+            }
 
             default:
-                // Sync rule fallback in async method
-                GenerateRuleCheckSync(sb, indent, prop, rule, model);
-                break;
-        }
-
-        if (!string.IsNullOrEmpty(scenarioCondition))
-        {
-            sb.Append(indent.Substring(4)).AppendLine("}");
+                return null;
         }
     }
 
-    private static string BuildScenarioCondition(string[]? scenarios)
+    private static bool RequireString(
+        AttributeData attribute,
+        PropertyShape shape,
+        string ruleName,
+        List<DiagnosticInfo> diagnostics)
     {
-        if (scenarios is null || scenarios.Length == 0)
+        if (shape.IsString)
         {
-            return string.Empty;
+            return true;
         }
 
-        var sb = new StringBuilder();
-        for (var i = 0; i < scenarios.Length; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append(" || ");
-            }
-            sb.Append("effectiveContext.Scenarios.Contains(\"").Append(EscapeString(scenarios[i])).Append("\")");
-        }
-        return sb.ToString();
+        diagnostics.Add(DiagnosticInfo.Create(
+            ValidatorEmitter.UnsupportedTargetId,
+            $"[{ruleName}] only applies to string properties; '{shape.Name}' is '{shape.BareTypeName}'.",
+            GetAttributeLocation(attribute)));
+        return false;
     }
 
-    private static string EscapeString(string value) =>
-        value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "");
-
-    private static void GenerateRegistrations(
-        SourceProductionContext context,
-        Compilation compilation,
-        ImmutableArray<ValidatorDescriptor> manualValidators,
-        ImmutableArray<ModelValidationDescriptor> generatedModels)
+    private static bool RequireNonString(
+        AttributeData attribute,
+        PropertyShape shape,
+        string ruleName,
+        List<DiagnosticInfo> diagnostics)
     {
-        var allDescriptors = new List<ValidatorDescriptor>();
-
-        // Add manual validators
-        allDescriptors.AddRange(manualValidators);
-
-        // Add generated validators
-        foreach (var model in generatedModels)
+        if (!shape.IsString)
         {
-            allDescriptors.Add(new ValidatorDescriptor(model.FullGeneratedValidatorTypeName, model.FullModelTypeName));
+            return true;
         }
 
-        // Add referenced validators
-        allDescriptors.AddRange(DiscoverReferencedValidators(compilation));
-
-        var distinctValidators = allDescriptors
-            .Distinct(ValidatorDescriptorComparer.Instance)
-            .OrderBy(static descriptor => descriptor.ValidatorType, StringComparer.Ordinal)
-            .ToArray();
-
-        if (distinctValidators.Length == 0)
-        {
-            return;
-        }
-
-        if (compilation.GetTypeByMetadataName(AspNetCoreExtensionsType) is null ||
-            compilation.GetTypeByMetadataName(ServiceCollectionType) is null)
-        {
-            context.ReportDiagnostic(Diagnostic.Create(MissingAspNetCoreIntegration, Location.None));
-            return;
-        }
-
-        context.AddSource(
-            "Validation.GeneratedRegistrations.g.cs",
-            SourceText.From(CreateRegistrationSource(distinctValidators), Encoding.UTF8));
+        diagnostics.Add(DiagnosticInfo.Create(
+            ValidatorEmitter.UnsupportedTargetId,
+            $"[{ruleName}] applies to comparable value properties; '{shape.Name}' is a string.",
+            GetAttributeLocation(attribute)));
+        return false;
     }
 
-    private static string CreateRegistrationSource(IReadOnlyList<ValidatorDescriptor> validators)
+    private static Location? GetAttributeLocation(AttributeData attribute) =>
+        attribute.ApplicationSyntaxReference is { } reference
+            ? Location.Create(reference.SyntaxTree, reference.Span)
+            : null;
+
+    private static EquatableArray<RuleArgument> Arguments(params RuleArgument[] arguments) => new(arguments);
+
+    private static object? GetConstructorValue(AttributeData attribute, int index) =>
+        attribute.ConstructorArguments.Length > index ? attribute.ConstructorArguments[index].Value : null;
+
+    private static int GetConstructorInt(AttributeData attribute, int index) =>
+        GetConstructorValue(attribute, index) is int value ? value : 0;
+
+    /// <summary>
+    /// Renders a numeric threshold as a C# literal. Uses the invariant culture (the host locale
+    /// must never leak into generated code) and picks a literal suffix from the property type so
+    /// comparisons against decimal/float properties compile.
+    /// </summary>
+    private static string RenderNumericLiteral(object? value, string bareTypeName)
     {
-        var source = new StringBuilder();
-        source.AppendLine("// <auto-generated />");
-        source.AppendLine("#nullable enable");
-        source.AppendLine();
-        source.AppendLine("namespace eQuantic.Validation.Generated;");
-        source.AppendLine();
-        source.AppendLine("/// <summary>Registers validators discovered or generated at compile time in this application and its references.</summary>");
-        source.AppendLine("public static class ValidationGeneratedExtensions");
-        source.AppendLine("{");
-        source.AppendLine("    /// <summary>Registers generated validators as scoped services.</summary>");
-        source.AppendLine("    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedValidation(");
-        source.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
-        source.AppendLine("    {");
-        source.AppendLine("        if (services is null) throw new global::System.ArgumentNullException(nameof(services));");
-        source.AppendLine("        global::eQuantic.Validation.AspNetCore.ServiceCollectionExtensions.AddValidation(services);");
-
-        foreach (var validator in validators)
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? "0";
+        var suffix = bareTypeName switch
         {
-            source.Append("        global::eQuantic.Validation.AspNetCore.ServiceCollectionExtensions.AddValidator<")
-                .Append(validator.ModelType)
-                .Append(", ")
-                .Append(validator.ValidatorType)
-                .AppendLine(">(services);");
-        }
+            "decimal" => "m",
+            "double" => "d",
+            "float" => "f",
+            "long" => "L",
+            "ulong" => "UL",
+            "uint" => "u",
+            _ => string.Empty,
+        };
 
-        source.AppendLine("        return services;");
-        source.AppendLine("    }");
-        source.AppendLine("}");
-
-        return source.ToString();
+        return text + suffix;
     }
 
-    private static bool IsAccessible(INamedTypeSymbol type, bool requirePublic)
+    private static bool IsAccessible(INamedTypeSymbol type)
     {
         for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
         {
-            if ((requirePublic && current.DeclaredAccessibility != Accessibility.Public) ||
-                (!requirePublic && current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal)))
+            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal))
             {
                 return false;
             }
         }
 
         return true;
-    }
-
-    private static IEnumerable<ValidatorDescriptor> DiscoverReferencedValidators(Compilation compilation)
-    {
-        foreach (var reference in compilation.References)
-        {
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-            {
-                continue;
-            }
-
-            foreach (var type in GetTypes(assembly.GlobalNamespace))
-            {
-                var descriptor = CreateManualValidatorDescriptor(type, requirePublic: true);
-                if (descriptor is not null)
-                {
-                    yield return descriptor;
-                }
-            }
-        }
-    }
-
-    private static IEnumerable<INamedTypeSymbol> GetTypes(INamespaceSymbol @namespace)
-    {
-        foreach (var type in @namespace.GetTypeMembers())
-        {
-            yield return type;
-            foreach (var nestedType in GetNestedTypes(type))
-            {
-                yield return nestedType;
-            }
-        }
-
-        foreach (var childNamespace in @namespace.GetNamespaceMembers())
-        {
-            foreach (var type in GetTypes(childNamespace))
-            {
-                yield return type;
-            }
-        }
-    }
-
-    private static IEnumerable<INamedTypeSymbol> GetNestedTypes(INamedTypeSymbol type)
-    {
-        foreach (var nestedType in type.GetTypeMembers())
-        {
-            yield return nestedType;
-            foreach (var descendant in GetNestedTypes(nestedType))
-            {
-                yield return descendant;
-            }
-        }
-    }
-
-    private static readonly DiagnosticDescriptor MissingAspNetCoreIntegration = new(
-        id: "VALGEN001",
-        title: "ASP.NET Core integration is required for generated registrations",
-        messageFormat: "Reference eQuantic.Validation.AspNetCore to use generated validator registrations",
-        category: "Validation",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true,
-        description: "The generated method calls validation registration extensions.");
-
-    private enum RuleKind
-    {
-        Required,
-        NotEmpty,
-        NotWhiteSpace,
-        Email,
-        MinLength,
-        MaxLength,
-        Length,
-        Range,
-        Pattern,
-        GreaterThan,
-        LessThan,
-        ValidateNested,
-        ValidateEach,
-        CustomRule
-    }
-
-    private sealed class ModelValidationDescriptor
-    {
-        public ModelValidationDescriptor(
-            string modelName,
-            string @namespace,
-            string fullModelTypeName,
-            string generatedValidatorName,
-            string fullGeneratedValidatorTypeName,
-            IReadOnlyList<PropertyValidationDescriptor> properties)
-        {
-            ModelName = modelName;
-            Namespace = @namespace;
-            FullModelTypeName = fullModelTypeName;
-            GeneratedValidatorName = generatedValidatorName;
-            FullGeneratedValidatorTypeName = fullGeneratedValidatorTypeName;
-            Properties = properties;
-        }
-
-        public string ModelName { get; }
-        public string Namespace { get; }
-        public string FullModelTypeName { get; }
-        public string GeneratedValidatorName { get; }
-        public string FullGeneratedValidatorTypeName { get; }
-        public IReadOnlyList<PropertyValidationDescriptor> Properties { get; }
-    }
-
-    private sealed class PropertyValidationDescriptor
-    {
-        public PropertyValidationDescriptor(
-            string propertyName,
-            string typeName,
-            bool isNullableOrReference,
-            IReadOnlyList<RuleDescriptor> rules)
-        {
-            PropertyName = propertyName;
-            TypeName = typeName;
-            IsNullableOrReference = isNullableOrReference;
-            Rules = rules;
-        }
-
-        public string PropertyName { get; }
-        public string TypeName { get; }
-        public bool IsNullableOrReference { get; }
-        public IReadOnlyList<RuleDescriptor> Rules { get; }
-    }
-
-    private sealed class RuleDescriptor
-    {
-        public RuleDescriptor(
-            RuleKind kind,
-            string code,
-            string message,
-            int severity,
-            string[]? scenarios,
-            IImmutableDictionary<string, object?> arguments)
-        {
-            Kind = kind;
-            Code = code;
-            Message = message;
-            Severity = severity;
-            Scenarios = scenarios;
-            Arguments = arguments;
-        }
-
-        public RuleKind Kind { get; }
-        public string Code { get; }
-        public string Message { get; }
-        public int Severity { get; }
-        public string[]? Scenarios { get; }
-        public IImmutableDictionary<string, object?> Arguments { get; }
-    }
-
-    private sealed class ValidatorDescriptor
-    {
-        public ValidatorDescriptor(string validatorType, string modelType)
-        {
-            ValidatorType = validatorType;
-            ModelType = modelType;
-        }
-
-        public string ValidatorType { get; }
-        public string ModelType { get; }
-    }
-
-    private sealed class ValidatorDescriptorComparer : IEqualityComparer<ValidatorDescriptor>
-    {
-        public static ValidatorDescriptorComparer Instance { get; } = new();
-
-        public bool Equals(ValidatorDescriptor? left, ValidatorDescriptor? right)
-        {
-            return ReferenceEquals(left, right) ||
-                   left is not null &&
-                   right is not null &&
-                   string.Equals(left.ValidatorType, right.ValidatorType, StringComparison.Ordinal);
-        }
-
-        public int GetHashCode(ValidatorDescriptor descriptor) =>
-            StringComparer.Ordinal.GetHashCode(descriptor.ValidatorType);
     }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,7 +14,9 @@ internal static class ValidationProblemDetailsFactory
             statusCode: StatusCodes.Status400BadRequest,
             extensions: new Dictionary<string, object?>
             {
-                ["issues"] = result.Failures,
+                // JsonNode serializes under source-generated JSON contexts, keeping the
+                // response Native AOT-safe; arbitrary CLR objects in extensions would not.
+                ["issues"] = ToJsonIssues(result),
             });
     }
 
@@ -24,7 +27,41 @@ internal static class ValidationProblemDetailsFactory
             Status = StatusCodes.Status400BadRequest,
             Title = "One or more validation errors occurred.",
         };
-        details.Extensions["issues"] = result.Failures;
+        details.Extensions["issues"] = ToPlainIssues(result);
         return details;
+    }
+
+    private static JsonArray ToJsonIssues(ValidationResult result)
+    {
+        var issues = new JsonArray();
+        foreach (var failure in result.Failures)
+        {
+            issues.Add(new JsonObject
+            {
+                ["path"] = failure.Path,
+                ["code"] = failure.Code,
+                ["message"] = failure.Message,
+                ["severity"] = failure.Severity.ToString(),
+            });
+        }
+
+        return issues;
+    }
+
+    private static List<Dictionary<string, string>> ToPlainIssues(ValidationResult result)
+    {
+        var issues = new List<Dictionary<string, string>>(result.Failures.Count);
+        foreach (var failure in result.Failures)
+        {
+            issues.Add(new Dictionary<string, string>
+            {
+                ["path"] = failure.Path,
+                ["code"] = failure.Code,
+                ["message"] = failure.Message,
+                ["severity"] = failure.Severity.ToString(),
+            });
+        }
+
+        return issues;
     }
 }

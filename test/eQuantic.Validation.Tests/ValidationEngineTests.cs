@@ -125,7 +125,7 @@ public sealed class ValidationEngineTests
     public async Task Dispatcher_resolves_explicitly_registered_validators_from_the_scope()
     {
         var services = new ServiceCollection();
-        services.AddValidation().AddValidator<Registration, RegistrationValidator>();
+        services.AddValidationDispatcher().AddValidator<Registration, RegistrationValidator>();
         await using var provider = services.BuildServiceProvider();
         await using var scope = provider.CreateAsyncScope();
 

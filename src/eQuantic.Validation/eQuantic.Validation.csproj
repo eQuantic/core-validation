@@ -1,20 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Title>eQuantic Validation</Title>
-    <Description>Modern, structured and asynchronous validation for .NET. Fluent rules, DataAnnotations interoperability, validation scenarios and ASP.NET Core-ready outcomes.</Description>
+    <Description>Modern, structured and asynchronous validation for .NET. Fluent rules, DataAnnotations interoperability, validation scenarios, dependency-injection dispatching and ASP.NET Core-ready outcomes.</Description>
     <AssemblyTitle>eQuantic.Validation</AssemblyTitle>
     <AssemblyName>eQuantic.Validation</AssemblyName>
     <PackageId>eQuantic.Validation</PackageId>
     <TargetFrameworks>netstandard2.0;net8.0;net10.0</TargetFrameworks>
     <PackageTags>eQuantic;Validation;FluentValidation;DataAnnotations;Async;DotNet</PackageTags>
-    <PackageReleaseNotes>Initial release: fluent validation, async rules, scenarios, nesting, collections and structured failures.</PackageReleaseNotes>
+    <PackageReleaseNotes>Breaking: DI dispatching moved into the core package as AddValidationDispatcher/AddValidator, string rules are now compile-time typed.</PackageReleaseNotes>
+    <IsAotCompatible Condition="'$(TargetFramework)' != 'netstandard2.0'">true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\eQuantic.Validation.Abstractions\eQuantic.Validation.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" Condition="'$(TargetFramework)' != 'net10.0'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" Condition="'$(TargetFramework)' == 'net10.0'" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.1" />
   </ItemGroup>
 </Project>

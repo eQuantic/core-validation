@@ -14,7 +14,7 @@ public class ValidationBenchmarks
     private BenchmarkCustomer _invalidCustomer = null!;
 
     private BenchmarkCustomerGeneratedValidator _sourceGenValidator = null!;
-    private EquanticCustomerFluentValidator _equanticFluentValidator = null!;
+    private FluentDslCustomerValidator _fluentDslValidator = null!;
     private FluentValidationCustomerValidator _fvValidator = null!;
 
     [GlobalSetup]
@@ -33,7 +33,7 @@ public class ValidationBenchmarks
             Document: "123");
 
         _sourceGenValidator = new BenchmarkCustomerGeneratedValidator();
-        _equanticFluentValidator = new EquanticCustomerFluentValidator();
+        _fluentDslValidator = new FluentDslCustomerValidator();
         _fvValidator = new FluentValidationCustomerValidator();
     }
 
@@ -44,9 +44,9 @@ public class ValidationBenchmarks
     }
 
     [Benchmark(Description = "eQuantic (Fluent DSL) - Valid")]
-    public ValidationResult EquanticFluent_Valid()
+    public ValidationResult FluentDsl_Valid()
     {
-        return _equanticFluentValidator.Validate(_validCustomer);
+        return _fluentDslValidator.Validate(_validCustomer);
     }
 
     [Benchmark(Description = "FluentValidation - Valid")]
@@ -62,9 +62,9 @@ public class ValidationBenchmarks
     }
 
     [Benchmark(Description = "eQuantic (Fluent DSL) - Invalid")]
-    public ValidationResult EquanticFluent_Invalid()
+    public ValidationResult FluentDsl_Invalid()
     {
-        return _equanticFluentValidator.Validate(_invalidCustomer);
+        return _fluentDslValidator.Validate(_invalidCustomer);
     }
 
     [Benchmark(Description = "FluentValidation - Invalid")]
@@ -81,9 +81,9 @@ public sealed record BenchmarkCustomer(
     [property: Range(18, 120)] int Age,
     [property: Required, Length(11, 14)] string Document);
 
-public sealed class EquanticCustomerFluentValidator : Validator<BenchmarkCustomer>
+public sealed class FluentDslCustomerValidator : Validator<BenchmarkCustomer>
 {
-    public EquanticCustomerFluentValidator()
+    public FluentDslCustomerValidator()
     {
         RuleFor(x => x.Name).NotEmpty().Length(2, 100);
         RuleFor(x => x.Email).NotEmpty().Email();

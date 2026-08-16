@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace eQuantic.Validation.AspNetCore;
+namespace eQuantic.Validation;
 
 /// <summary>Default dispatcher used by the HTTP integrations and available for message consumers.</summary>
 public sealed class ValidationDispatcher : IValidationDispatcher
@@ -81,9 +81,9 @@ public sealed class ValidationDispatcher : IValidationDispatcher
         }
 
         var combinedResult = ValidationResult.Combine(results);
-        var durationMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        var durationSeconds = GetElapsedSeconds(startTimestamp);
 
-        ValidationDiagnostics.ValidationDuration.Record(durationMs, new KeyValuePair<string, object?>("model", modelName));
+        ValidationDiagnostics.ValidationDuration.Record(durationSeconds, new KeyValuePair<string, object?>("model", modelName));
 
         var status = combinedResult.IsValid ? "success" : "failed";
         ValidationDiagnostics.ValidationsTotal.Add(1,
@@ -102,5 +102,14 @@ public sealed class ValidationDispatcher : IValidationDispatcher
         }
 
         return combinedResult;
+    }
+
+    private static double GetElapsedSeconds(long startTimestamp)
+    {
+#if NET8_0_OR_GREATER
+        return Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds;
+#else
+        return (Stopwatch.GetTimestamp() - startTimestamp) / (double)Stopwatch.Frequency;
+#endif
     }
 }
