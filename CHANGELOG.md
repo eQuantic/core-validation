@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.0](https://github.com/eQuantic/core-validation/compare/v2.1.0...v2.2.0) (2026-08-16)
+
+### Features
+
+* cross-property comparisons, built-in message translations and inline child rules ([ba1d75c](https://github.com/eQuantic/core-validation/commit/ba1d75c3da9e46c017dbe76b0eecbf4e2a8e51f4))
+
+### Bug Fixes
+
+* accessor collector ignored ChildRules receivers, generating invalid code ([e1ab3bc](https://github.com/eQuantic/core-validation/commit/e1ab3bc2929066dda515f23fac593a2fd0f855ff))
+
 ## [2.1.0](https://github.com/eQuantic/core-validation/compare/v2.0.0...v2.1.0) (2026-08-16)
 
 ### Features
