@@ -202,6 +202,33 @@ public sealed class GeneratorEmissionTests
     }
 
     [Test]
+    public void ChildRules_lambdas_do_not_register_accessors_against_the_outer_model()
+    {
+        var run = RunGenerator(Preamble + """
+            public sealed record Team(IReadOnlyList<Member> Members);
+            public sealed record Member(string? Name);
+
+            public sealed class TeamValidator : Validator<Team>
+            {
+                public TeamValidator()
+                {
+                    RuleForEach(x => x.Members).ChildRules(member =>
+                        member.RuleFor(m => m.Name).NotWhiteSpace());
+                }
+            }
+            """);
+
+        AssertCompiles(run);
+        var text = GeneratedText(run);
+        Assert.Multiple(() =>
+        {
+            Assert.That(text, Does.Contain("Register<global::Generated.Tests.Team"));
+            Assert.That(text, Does.Not.Contain("Register<global::Generated.Tests.Team, string?>(\"Name\""),
+                "inner ChildRules lambdas target Member, not Team");
+        });
+    }
+
+    [Test]
     public void Registration_extension_is_internal_and_targets_the_core_package()
     {
         var run = RunGenerator(Preamble + """

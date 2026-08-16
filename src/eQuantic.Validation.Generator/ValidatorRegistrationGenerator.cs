@@ -116,10 +116,14 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Only the validator's own RuleFor/RuleForEach calls (implicit or explicit this)
+            // target TModel; receiver calls such as `child.RuleFor(...)` inside ChildRules
+            // lambdas target other models and must not be registered against TModel.
             var methodName = invocation.Expression switch
             {
                 IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
-                MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+                MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } member =>
+                    member.Name.Identifier.ValueText,
                 _ => null,
             };
 
