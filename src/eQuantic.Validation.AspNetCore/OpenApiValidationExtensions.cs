@@ -137,8 +137,16 @@ public static class OpenApiValidationExtensions
                     propertySchema.ExclusiveMinimum = GetNumber(rule, "Minimum");
                     break;
 
+                case ValidationRuleKinds.GreaterThanOrEqual:
+                    propertySchema.Minimum = GetNumber(rule, "Minimum");
+                    break;
+
                 case ValidationRuleKinds.LessThan:
                     propertySchema.ExclusiveMaximum = GetNumber(rule, "Maximum");
+                    break;
+
+                case ValidationRuleKinds.LessThanOrEqual:
+                    propertySchema.Maximum = GetNumber(rule, "Maximum");
                     break;
 
                 case ValidationRuleKinds.InclusiveBetween:

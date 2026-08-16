@@ -58,6 +58,22 @@ public sealed class PaymentValidator : Validator<PaymentRequest>
 }
 ```
 
+Shortcuts cover the common cases without ceremony — `GreaterThanOrEqualTo`, `LessThanOrEqualTo`,
+`NotEqualTo`, `OneOf`, and `InlineValidator<T>` for rules without a subclass:
+
+```csharp
+var validator = new InlineValidator<Order>(v =>
+{
+    v.RuleFor(x => x.Quantity).GreaterThanOrEqualTo(1);
+    v.RuleFor(x => x.Currency).NotNull().OneOf("BRL", "EUR", "USD");
+    v.RuleFor(x => x.Status).NotEqualTo("deleted");
+});
+```
+
+When the source generator is installed, every `RuleFor(x => x.Prop)` accessor is pre-compiled at
+build time and registered at module load — the fluent path never pays `Expression.Compile()` at
+runtime (notably: validators are scoped, so without this the compilation cost repeats per request).
+
 ### 3. Domain Value Objects (DDD) & Parsable Types Validation
 
 Validate domain Value Object creation and parsable types without coupling your validation layer to external domain frameworks:
@@ -292,10 +308,11 @@ arguments), which keeps localization consistent across the generated and fluent 
 | **Trimming / Native AOT** | ⚠️ Heavy reflection | ✅ Trim/AOT analyzers enabled on core packages; generated path is reflection-free¹ |
 | **Concurrent execution** | ❌ Sequential only | ✅ Opt-in `ValidationExecutionMode.Parallel` (sequential by default) |
 
-¹ The fluent DSL compiles property accessors from expression trees, which run interpreted under
-Native AOT (functional, with reduced throughput). The source-generated path has no such caveat.
-`AttributeValidator<T>` (the DataAnnotations adapter) is reflection-based and annotated with
-`[RequiresUnreferencedCode]`.
+¹ With the generator installed, fluent `RuleFor` accessors are pre-compiled at build time and
+registered via module initializer — no `Expression.Compile()` per validator instantiation on JIT
+and no expression interpreter under Native AOT. Without the generator, the fluent path falls back
+to compiling expressions (interpreted under AOT). `AttributeValidator<T>` (the DataAnnotations
+adapter) is reflection-based and annotated with `[RequiresUnreferencedCode]`.
 
 ---
 

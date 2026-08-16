@@ -22,19 +22,28 @@ public abstract class Validator<T> : IValidator<T>, IDescribableValidator
     /// <summary>Begins a rule chain for a property or nested property.</summary>
     protected RuleBuilder<T, TProperty> RuleFor<TProperty>(Expression<Func<T, TProperty>> expression)
     {
-        var rule = new PropertyRule<T, TProperty>(PropertyPath.FromExpression(expression), expression.Compile());
+        var path = PropertyPath.FromExpression(expression);
+        var accessor = ValidatorAccessors.Find<T, TProperty>(path) ?? expression.Compile();
+        var rule = new PropertyRule<T, TProperty>(path, accessor);
         _rules.Add(rule);
         return new RuleBuilder<T, TProperty>(rule);
     }
 
     /// <summary>Begins a rule chain for the complete model instance, ideal for relational and pattern-matching rules.</summary>
-    protected RuleBuilder<T, T> RuleForModel() => RuleFor(static instance => instance);
+    protected RuleBuilder<T, T> RuleForModel()
+    {
+        var rule = new PropertyRule<T, T>(string.Empty, static instance => instance);
+        _rules.Add(rule);
+        return new RuleBuilder<T, T>(rule);
+    }
 
     /// <summary>Begins a rule chain that runs once for each item in a collection.</summary>
     protected CollectionRuleBuilder<T, TElement> RuleForEach<TElement>(
         Expression<Func<T, IEnumerable<TElement>?>> expression)
     {
-        var rule = new CollectionRule<T, TElement>(PropertyPath.FromExpression(expression), expression.Compile());
+        var path = PropertyPath.FromExpression(expression);
+        var accessor = ValidatorAccessors.Find<T, IEnumerable<TElement>?>(path) ?? expression.Compile();
+        var rule = new CollectionRule<T, TElement>(path, accessor);
         _rules.Add(rule);
         return new CollectionRuleBuilder<T, TElement>(rule);
     }

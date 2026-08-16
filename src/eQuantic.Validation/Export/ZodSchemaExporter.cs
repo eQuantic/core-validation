@@ -238,8 +238,12 @@ public static class ZodSchemaExporter
                     : ".regex(/" + pattern!.Replace("/", "\\/") + "/)";
             case ValidationRuleKinds.GreaterThan:
                 return ".gt(" + Number(rule, "Minimum") + ")";
+            case ValidationRuleKinds.GreaterThanOrEqual:
+                return ".gte(" + Number(rule, "Minimum") + ")";
             case ValidationRuleKinds.LessThan:
                 return ".lt(" + Number(rule, "Maximum") + ")";
+            case ValidationRuleKinds.LessThanOrEqual:
+                return ".lte(" + Number(rule, "Maximum") + ")";
             case ValidationRuleKinds.InclusiveBetween:
                 return ".gte(" + Number(rule, "Minimum") + ").lte(" + Number(rule, "Maximum") + ")";
             default:
@@ -253,7 +257,9 @@ public static class ZodSchemaExporter
             .Where(static rule => rule.Kind is ValidationRuleKinds.Predicate
                 or ValidationRuleKinds.Match
                 or ValidationRuleKinds.Create
-                or ValidationRuleKinds.Parse)
+                or ValidationRuleKinds.Parse
+                or ValidationRuleKinds.NotEqual
+                or ValidationRuleKinds.OneOf)
             .Select(static rule => rule.Code)
             .Distinct(StringComparer.Ordinal)
             .ToArray();

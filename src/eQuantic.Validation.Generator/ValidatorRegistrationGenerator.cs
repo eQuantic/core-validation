@@ -20,6 +20,12 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
     private const string CoreExtensionsType = "eQuantic.Validation.ServiceCollectionExtensions";
     private const string ServiceCollectionType = "Microsoft.Extensions.DependencyInjection.IServiceCollection";
 
+    /// <summary>Fully qualified display including nullable reference annotations, so generated
+    /// accessor delegates match the nullability of the source expressions (no CS86xx warnings).</summary>
+    private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
+        SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(
+            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -43,7 +49,19 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
         var capabilities = context.CompilationProvider.Select(static (compilation, _) =>
             new RegistrationCapabilities(
                 compilation.GetTypeByMetadataName(CoreExtensionsType) is not null,
-                compilation.GetTypeByMetadataName(ServiceCollectionType) is not null));
+                compilation.GetTypeByMetadataName(ServiceCollectionType) is not null,
+                compilation.GetTypeByMetadataName("eQuantic.Validation.ValidatorAccessors") is not null,
+                compilation.GetTypeByMetadataName("System.Runtime.CompilerServices.ModuleInitializerAttribute") is not null));
+
+        // Property accessors used by fluent RuleFor/RuleForEach calls, pre-compiled at module
+        // load so the fluent path skips Expression.Compile (per-instantiation on JIT, interpreted
+        // under Native AOT).
+        var accessorRegistrations = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
+                static (syntaxContext, cancellationToken) => CreateAccessorDescriptor(syntaxContext, cancellationToken))
+            .Where(static descriptor => descriptor is not null)
+            .Select(static (descriptor, _) => descriptor!);
 
         context.RegisterSourceOutput(models, static (productionContext, model) =>
             ValidatorEmitter.EmitModelValidator(productionContext, model));
@@ -54,6 +72,154 @@ public sealed class ValidatorRegistrationGenerator : IIncrementalGenerator
             var ((manuals, generatedModels), registrationCapabilities) = source;
             ValidatorEmitter.EmitRegistrations(productionContext, manuals, generatedModels, registrationCapabilities);
         });
+
+        var accessorInputs = accessorRegistrations.Collect().Combine(capabilities);
+        context.RegisterSourceOutput(accessorInputs, static (productionContext, source) =>
+        {
+            var (descriptors, registrationCapabilities) = source;
+            ValidatorEmitter.EmitAccessorRegistrations(productionContext, descriptors, registrationCapabilities);
+        });
+    }
+
+    private static AccessorRegistrationDescriptor? CreateAccessorDescriptor(
+        GeneratorSyntaxContext context,
+        CancellationToken cancellationToken)
+    {
+        if (context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken) is not INamedTypeSymbol validatorType ||
+            validatorType.IsGenericType)
+        {
+            return null;
+        }
+
+        // Only fluent validators (subclasses of Validator<TModel>) declare RuleFor accessors.
+        INamedTypeSymbol? modelType = null;
+        for (var current = validatorType.BaseType; current is not null; current = current.BaseType)
+        {
+            if (current.OriginalDefinition.MetadataName == "Validator`1" &&
+                current.OriginalDefinition.ContainingNamespace.ToDisplayString() == ValidatorNamespace)
+            {
+                modelType = current.TypeArguments[0] as INamedTypeSymbol;
+                break;
+            }
+        }
+
+        if (modelType is null || modelType.TypeKind == TypeKind.Error || !IsExternallyReachable(modelType))
+        {
+            return null;
+        }
+
+        var modelTypeName = modelType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var entries = new List<AccessorEntry>();
+        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var invocation in context.Node.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var methodName = invocation.Expression switch
+            {
+                IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+                MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+                _ => null,
+            };
+
+            if (methodName is not ("RuleFor" or "RuleForEach") ||
+                invocation.ArgumentList.Arguments.Count != 1)
+            {
+                continue;
+            }
+
+            var lambdaBody = invocation.ArgumentList.Arguments[0].Expression switch
+            {
+                SimpleLambdaExpressionSyntax simple => simple.ExpressionBody,
+                ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ExpressionBody,
+                _ => null,
+            };
+
+            if (lambdaBody is null || !TryGetMemberSegments(lambdaBody, out var segments))
+            {
+                continue;
+            }
+
+            var path = string.Join(".", segments);
+            if (path.Length == 0 || !seenPaths.Add(methodName + ":" + path))
+            {
+                continue;
+            }
+
+            if (context.SemanticModel.GetSymbolInfo(Unwrap(lambdaBody), cancellationToken).Symbol
+                    is not IPropertySymbol property ||
+                !IsExternallyReachable(property.Type))
+            {
+                continue;
+            }
+
+            string valueTypeName;
+            if (methodName == "RuleForEach")
+            {
+                if (context.SemanticModel.GetSymbolInfo(invocation, cancellationToken).Symbol
+                        is not IMethodSymbol { TypeArguments.Length: 1 } method ||
+                    !IsExternallyReachable(method.TypeArguments[0]))
+                {
+                    continue;
+                }
+
+                valueTypeName = "global::System.Collections.Generic.IEnumerable<" +
+                    method.TypeArguments[0].ToDisplayString(FullyQualifiedNullableFormat) + ">?";
+            }
+            else
+            {
+                valueTypeName = property.Type.ToDisplayString(FullyQualifiedNullableFormat);
+            }
+
+            // Intermediate segments carry '!' so the generated accessor never warns on nullable chains.
+            var body = "static x => x." + string.Join("!.", segments);
+            entries.Add(new AccessorEntry(path, valueTypeName, body));
+        }
+
+        return entries.Count == 0
+            ? null
+            : new AccessorRegistrationDescriptor(modelTypeName, new EquatableArray<AccessorEntry>(entries.ToArray()));
+    }
+
+    private static bool TryGetMemberSegments(ExpressionSyntax body, out List<string> segments)
+    {
+        segments = new List<string>();
+        var current = Unwrap(body);
+
+        while (current is MemberAccessExpressionSyntax memberAccess)
+        {
+            segments.Insert(0, memberAccess.Name.Identifier.ValueText);
+            current = Unwrap(memberAccess.Expression);
+        }
+
+        return segments.Count > 0 && current is IdentifierNameSyntax;
+    }
+
+    private static ExpressionSyntax Unwrap(ExpressionSyntax expression)
+    {
+        while (expression is PostfixUnaryExpressionSyntax postfix &&
+               postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression))
+        {
+            expression = postfix.Operand;
+        }
+
+        return expression;
+    }
+
+    /// <summary>Accessor registrations live in a generated top-level class, so every type they
+    /// mention must be reachable from outside its declaring type (no private nested types).</summary>
+    private static bool IsExternallyReachable(ITypeSymbol type)
+    {
+        for (ITypeSymbol? current = type; current is not null; current = current.ContainingType)
+        {
+            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.NotApplicable))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static ValidatorDescriptor? CreateManualValidatorDescriptor(

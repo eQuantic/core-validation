@@ -26,8 +26,16 @@ public static class ValidationRuleKinds
     public const string Equal = "equal";
     /// <summary>A value must be strictly greater than a threshold.</summary>
     public const string GreaterThan = "greater_than";
+    /// <summary>A value must be greater than or equal to a threshold.</summary>
+    public const string GreaterThanOrEqual = "greater_than_or_equal";
     /// <summary>A value must be strictly less than a threshold.</summary>
     public const string LessThan = "less_than";
+    /// <summary>A value must be less than or equal to a threshold.</summary>
+    public const string LessThanOrEqual = "less_than_or_equal";
+    /// <summary>A value must differ from a forbidden value.</summary>
+    public const string NotEqual = "not_equal";
+    /// <summary>A value must be one of an allowed set.</summary>
+    public const string OneOf = "one_of";
     /// <summary>A value must be inside an inclusive range.</summary>
     public const string InclusiveBetween = "inclusive_between";
     /// <summary>A custom synchronous or asynchronous predicate.</summary>

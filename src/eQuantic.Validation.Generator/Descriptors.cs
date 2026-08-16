@@ -103,4 +103,15 @@ internal sealed record ModelDescriptor(
 
 internal sealed record ValidatorDescriptor(string ValidatorType, string ModelType);
 
-internal sealed record RegistrationCapabilities(bool HasCorePackage, bool HasServiceCollection);
+internal sealed record RegistrationCapabilities(
+    bool HasCorePackage,
+    bool HasServiceCollection,
+    bool HasAccessorRegistry,
+    bool HasModuleInitializer);
+
+/// <summary>A property accessor lambda discovered inside a fluent validator's RuleFor call.</summary>
+internal sealed record AccessorEntry(string Path, string ValueTypeName, string AccessorBody);
+
+internal sealed record AccessorRegistrationDescriptor(
+    string ModelTypeName,
+    EquatableArray<AccessorEntry> Entries);

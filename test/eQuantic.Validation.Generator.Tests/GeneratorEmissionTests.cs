@@ -169,6 +169,38 @@ public sealed class GeneratorEmissionTests
     }
 
     [Test]
+    public void Fluent_validators_get_precompiled_accessor_registrations()
+    {
+        var run = RunGenerator(Preamble + """
+            public sealed record Person(string? Name, Address? Address, IReadOnlyList<string> Tags);
+            public sealed record Address(string? Street);
+
+            public sealed class PersonValidator : Validator<Person>
+            {
+                public PersonValidator()
+                {
+                    RuleFor(x => x.Name).NotWhiteSpace();
+                    RuleFor(x => x.Address!.Street).NotWhiteSpace();
+                    RuleForEach(x => x.Tags).Must(static tag => tag.Length > 0);
+                }
+            }
+            """);
+
+        AssertCompiles(run);
+        var text = GeneratedText(run);
+        Assert.Multiple(() =>
+        {
+            Assert.That(text, Does.Contain("[global::System.Runtime.CompilerServices.ModuleInitializer]"));
+            Assert.That(text, Does.Contain(
+                "Register<global::Generated.Tests.Person, string?>(\"Name\", static x => x.Name)"));
+            Assert.That(text, Does.Contain(
+                "Register<global::Generated.Tests.Person, string?>(\"Address.Street\", static x => x.Address!.Street)"));
+            Assert.That(text, Does.Contain(
+                "Register<global::Generated.Tests.Person, global::System.Collections.Generic.IEnumerable<string>?>(\"Tags\", static x => x.Tags)"));
+        });
+    }
+
+    [Test]
     public void Registration_extension_is_internal_and_targets_the_core_package()
     {
         var run = RunGenerator(Preamble + """

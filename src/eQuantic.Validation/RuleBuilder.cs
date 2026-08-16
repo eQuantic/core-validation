@@ -58,6 +58,17 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             kind: ValidationRuleKinds.GreaterThan);
     }
 
+    /// <summary>Requires the value to be greater than or equal to <paramref name="minimum"/>.</summary>
+    public RuleBuilder<T, TProperty> GreaterThanOrEqualTo(TProperty minimum)
+    {
+        return Add(
+            (_, value) => value is null || Comparer<TProperty>.Default.Compare(value, minimum) >= 0,
+            ValidationCodes.Range,
+            "{Property} must be at least {Minimum}.",
+            new Dictionary<string, object?> { ["Minimum"] = minimum },
+            kind: ValidationRuleKinds.GreaterThanOrEqual);
+    }
+
     /// <summary>Requires the value to be less than <paramref name="maximum"/>.</summary>
     public RuleBuilder<T, TProperty> LessThan(TProperty maximum)
     {
@@ -67,6 +78,46 @@ public sealed class RuleBuilder<T, TProperty> : IRuleBuilder<T, TProperty>
             "{Property} must be less than {Maximum}.",
             new Dictionary<string, object?> { ["Maximum"] = maximum },
             kind: ValidationRuleKinds.LessThan);
+    }
+
+    /// <summary>Requires the value to be less than or equal to <paramref name="maximum"/>.</summary>
+    public RuleBuilder<T, TProperty> LessThanOrEqualTo(TProperty maximum)
+    {
+        return Add(
+            (_, value) => value is null || Comparer<TProperty>.Default.Compare(value, maximum) <= 0,
+            ValidationCodes.Range,
+            "{Property} must be at most {Maximum}.",
+            new Dictionary<string, object?> { ["Maximum"] = maximum },
+            kind: ValidationRuleKinds.LessThanOrEqual);
+    }
+
+    /// <summary>Requires the value to differ from <paramref name="forbidden"/>.</summary>
+    public RuleBuilder<T, TProperty> NotEqualTo(TProperty forbidden)
+    {
+        return Add(
+            (_, value) => !EqualityComparer<TProperty>.Default.Equals(value, forbidden),
+            ValidationCodes.Predicate,
+            "{Property} has a forbidden value.",
+            new Dictionary<string, object?> { ["Forbidden"] = forbidden },
+            kind: ValidationRuleKinds.NotEqual);
+    }
+
+    /// <summary>Requires the value to be one of <paramref name="allowed"/>. Null passes; combine with <see cref="NotNull"/> to require a value.</summary>
+    public RuleBuilder<T, TProperty> OneOf(params TProperty[] allowed)
+    {
+        if (allowed is null || allowed.Length == 0)
+        {
+            throw new ArgumentException("At least one allowed value is required.", nameof(allowed));
+        }
+
+        var allowedCopy = (TProperty[])allowed.Clone();
+        return Add(
+            (_, value) => value is null || Array.Exists(allowedCopy, candidate =>
+                EqualityComparer<TProperty>.Default.Equals(candidate, value)),
+            ValidationCodes.Predicate,
+            "{Property} must be one of the allowed values.",
+            new Dictionary<string, object?> { ["AllowedValues"] = allowedCopy },
+            kind: ValidationRuleKinds.OneOf);
     }
 
     /// <summary>Requires the value to be inside an inclusive range.</summary>
